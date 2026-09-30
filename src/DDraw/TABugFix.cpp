@@ -230,6 +230,8 @@ int __stdcall PatrolDisableBuildRepairProc(PInlineX86StackBuffer X86StrackBuffer
 {
 	const UnitStruct* unit = (const UnitStruct*)X86StrackBuffer->Esi;
 	Dialog* settingsDialog = (Dialog*)LocalShare->Dialog;
+	if (settingsDialog == NULL)
+		return 0;	// settings dialog not created yet: keep TA's own behaviour
 	int unitMovementSetting = ((unit->UnitSelected & 0x000c0000) >> 18);
 	int patrolOption = settingsDialog->GetConUnitPatrolOption(unitMovementSetting);
 	if (patrolOption == Dialog::RECLAIM_ONLY)
@@ -245,6 +247,8 @@ int __stdcall PatrolDisableReclaimProc(PInlineX86StackBuffer X86StrackBuffer)
 {
 	const UnitStruct* unit = (const UnitStruct*)X86StrackBuffer->Esi;
 	Dialog* settingsDialog = (Dialog*)LocalShare->Dialog;
+	if (settingsDialog == NULL)
+		return 0;	// settings dialog not created yet: keep TA's own behaviour
 	int unitMovementSetting = ((unit->UnitSelected & 0x000c0000) >> 18);
 	int patrolOption = settingsDialog->GetConUnitPatrolOption(unitMovementSetting);
 	if (patrolOption == Dialog::ASSIST_ONLY)
@@ -260,6 +264,8 @@ int __stdcall VTOLPatrolDisableBuildRepairProc(PInlineX86StackBuffer X86StrackBu
 {
 	const UnitStruct* unit = (const UnitStruct*)X86StrackBuffer->Edi;
 	Dialog* settingsDialog = (Dialog*)LocalShare->Dialog;
+	if (settingsDialog == NULL)
+		return 0;	// settings dialog not created yet: keep TA's own behaviour
 	int unitMovementSetting = ((unit->UnitSelected & 0x000c0000) >> 18);
 	int patrolOption = settingsDialog->GetConUnitPatrolOption(unitMovementSetting);
 	if (patrolOption == Dialog::RECLAIM_ONLY)
@@ -275,6 +281,8 @@ int __stdcall VTOLPatrolDisableReclaimProc(PInlineX86StackBuffer X86StrackBuffer
 {
 	const UnitStruct* unit = (const UnitStruct*)X86StrackBuffer->Edi;
 	Dialog* settingsDialog = (Dialog*)LocalShare->Dialog;
+	if (settingsDialog == NULL)
+		return 0;	// settings dialog not created yet: keep TA's own behaviour
 	int unitMovementSetting = ((unit->UnitSelected & 0x000c0000) >> 18);
 	int patrolOption = settingsDialog->GetConUnitPatrolOption(unitMovementSetting);
 	if (patrolOption == Dialog::ASSIST_ONLY)
@@ -780,6 +788,8 @@ int __stdcall FixedPositionGuardingConsProc(PInlineX86StackBuffer X86StrackBuffe
 	UnitOrdersStruct* const orders = (UnitOrdersStruct*)(X86StrackBuffer->Ebx);
 	UnitStruct* const guardingUnit = orders->Unit_ptr;
 	Dialog* settingsDialog = (Dialog*)LocalShare->Dialog;
+	if (settingsDialog == NULL)
+		return 0;	// settings dialog not created yet: keep TA's own behaviour
 
 	int unitMovementSetting = ((guardingUnit->UnitSelected & 0x000c0000) >> 18);
 	int guardOption = settingsDialog->GetConUnitGuardOption(unitMovementSetting);
