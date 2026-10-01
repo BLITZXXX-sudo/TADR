@@ -124,7 +124,7 @@ namespace
 
 		__try
 		{
-			for (int n = 0; n < kMaxPlayers; ++n)
+			for (int n = 0; n < TAPlayerCount(); ++n)
 			{
 				// Identity only (Name, DirectPlayID) -- NOT PlayerActive. This
 				// fingerprint's whole job is telling "still the same game" from
@@ -194,10 +194,10 @@ namespace
 	void ReportMuteState(int slot)
 	{
 		TAdynmemStruct* ta = GetTA();
-		const char* name = (ta && slot >= 0 && slot < kMaxPlayers)
+		const char* name = (ta && slot >= 0 && slot < TAPlayerCount())
 			? ta->Players[slot].Name : "?";
 
-		const unsigned char m = (slot >= 0 && slot < kMaxPlayers) ? g_mask[slot] : 0;
+		const unsigned char m = (slot >= 0 && slot < TAPlayerCount()) ? g_mask[slot] : 0;
 		char msg[160];
 		if (m == 0)
 		{
@@ -221,7 +221,7 @@ namespace
 			return;
 
 		bool any = false;
-		for (int n = 0; n < kMaxPlayers; ++n)
+		for (int n = 0; n < TAPlayerCount(); ++n)
 		{
 			if (g_mask[n] == 0)
 				continue;
@@ -334,7 +334,7 @@ namespace
 
 			// Slot 10 is the system sentinel: unit alerts, TADR's own local
 			// messages and self-typed chat. Never muted.
-			if (slot < 0 || slot >= kMaxPlayers)
+			if (slot < 0 || slot >= TAPlayerCount())
 				return 0;
 
 			if (g_mask[slot] == 0)
@@ -449,21 +449,21 @@ void PlayerMute::Shutdown()
 
 bool PlayerMute::IsMuted(int slot, Category cat)
 {
-	if (slot < 0 || slot >= kMaxPlayers)
+	if (slot < 0 || slot >= TAPlayerCount())
 		return false;
 	return (g_mask[slot] & (unsigned char)cat) != 0;
 }
 
 bool PlayerMute::IsAnyMuted(int slot)
 {
-	if (slot < 0 || slot >= kMaxPlayers)
+	if (slot < 0 || slot >= TAPlayerCount())
 		return false;
 	return g_mask[slot] != 0;
 }
 
 void PlayerMute::SetMuted(int slot, Category cat, bool on)
 {
-	if (slot < 0 || slot >= kMaxPlayers)
+	if (slot < 0 || slot >= TAPlayerCount())
 		return;
 	if (on)
 		g_mask[slot] |= (unsigned char)cat;
@@ -473,7 +473,7 @@ void PlayerMute::SetMuted(int slot, Category cat, bool on)
 
 bool PlayerMute::Toggle(int slot, Category cat)
 {
-	if (slot < 0 || slot >= kMaxPlayers)
+	if (slot < 0 || slot >= TAPlayerCount())
 		return false;
 	const bool nowOn = (g_mask[slot] & (unsigned char)cat) != (unsigned char)cat;
 	SetMuted(slot, cat, nowOn);
@@ -520,7 +520,7 @@ int PlayerMute::FindSlotByName(const char* name)
 	int prefixHit = -1;
 	int prefixCount = 0;
 
-	for (int i = 0; i < kMaxPlayers; ++i)
+	for (int i = 0; i < TAPlayerCount(); ++i)
 	{
 		const PlayerStruct& p = ta->Players[i];
 		if (!p.PlayerActive || !p.Name[0])
@@ -549,5 +549,5 @@ void PlayerMute::LocalNotice(const char* msg)
 		return;
 	// playerIndex 10 = system sentinel: no logo, no arrival sound, and our
 	// own filter never touches it.
-	NewChatText(const_cast<char*>(msg), 1, 0, (char)kSystemSlot);
+	NewChatText(const_cast<char*>(msg), 1, 0, TAIs16P() ? TANoPlayerIndex() : (char)kSystemSlot);	// slot 10 is a real player on the 16-player exe
 }

@@ -125,7 +125,7 @@ AlliesWhiteboard::~AlliesWhiteboard()
 
 PlayerStruct* AlliesWhiteboard::GetPlayer(int n)
 {
-	if (n < 0 || n >= 10) {
+	if (n < 0 || n >= TAPlayerCount()) {
 		return NULL;
 	}
 
@@ -142,7 +142,7 @@ char AlliesWhiteboard::GetLocalPlayerColor()
 {
 	TAdynmemStruct* Ptr = *TAmainStruct_PtrPtr;
 	int localPlayerId = Ptr->LocalHumanPlayer_PlayerID;
-	PlayerInfoStruct* playerInfo = Ptr->Players[localPlayerId % 10].PlayerInfo;
+	PlayerInfoStruct* playerInfo = Ptr->Players[localPlayerId % TAPlayerCount()].PlayerInfo;
 	if (playerInfo) {
 		return playerInfo->PlayerLogoColor;
 	}
@@ -230,7 +230,7 @@ void AlliesWhiteboard::InitialisePlayerNumberFromInitialColor()
 	for (int c = 0; c < 10; ++c) {
 		PlayerNumbersByInitialColor[c] = -1;
 	}
-	for (int n = 0; n < 10; ++n) {
+	for (int n = 0; n < TAPlayerCount(); ++n) {
 		PlayerStruct* player = GetPlayer(n);
 		if (player && player->PlayerInfo && player->PlayerActive) {
 			int c = player->PlayerInfo->PlayerLogoColor;

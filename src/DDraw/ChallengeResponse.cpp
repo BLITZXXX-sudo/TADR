@@ -193,7 +193,7 @@ int __stdcall ChallengeResponseUpdateProc(PInlineX86StackBuffer X86StrackBuffer)
 	else if (taPtr->GameTime == 6 * 30) { // at 6 sec
 		PROFILE_SCOPE("CR.SendChallengeRequests");
 		// send out challenge requests
-		for (int n = 0; n < 10; ++n) {
+		for (int n = 0; n < TAPlayerCount(); ++n) {
 			PlayerStruct* p = &taPtr->Players[n];
 			if (p->PlayerActive && p->DirectPlayID != 0 && GetInferredPlayerType(p) == Player_RemoteHuman && !(p->PlayerInfo->PropertyMask & WATCH)) {
 				ChallengeResponseMessage msg;

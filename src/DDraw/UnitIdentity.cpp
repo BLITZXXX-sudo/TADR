@@ -148,7 +148,7 @@ struct BlockView
 };
 // [slot][history] -- our snapshots of every player's block, keyed by the audit
 // tick so an arriving digest is compared against the same instant.
-BlockView g_localView[10][kViewHistory];
+BlockView g_localView[TA_MAX_PLAYERS][kViewHistory];
 int g_viewCursor = 0;
 
 const BlockView* FindView(int slot, int tick)
@@ -167,7 +167,7 @@ struct PeerCheck
 	int  streak;        // consecutive audits disagreeing with the owner
 	bool alarmed;       // already logged this run of disagreements
 };
-PeerCheck g_peerCheck[10];
+PeerCheck g_peerCheck[TA_MAX_PLAYERS];
 
 #pragma pack(push, 1)
 // CHAT_05 hijack: the owner of a block states its own live count and identity
@@ -344,7 +344,7 @@ int __stdcall TwoCEntryProc(PInlineX86StackBuffer pBuf)
 	// The sender's own block. Only entries inside it can be legitimate.
 	unsigned reason = 0;
 	const int ownerSlot = candidate ? (int)candidate->cOwnerID : -1;
-	if (ownerSlot < 0 || ownerSlot >= 10)
+	if (ownerSlot < 0 || ownerSlot >= TAPlayerCount())
 	{
 		reason |= k2cReasonBadUnitPtr;   // cOwnerID unreadable/insane => pointer is wild
 	}
@@ -546,7 +546,7 @@ void HandleIdentityDigest(unsigned fromDpid, const void* buf)
 	// Trust the DirectPlay source, not the claimed slot: a client may only
 	// speak for its own block.
 	int senderSlot = -1;
-	for (int i = 0; i < 10; ++i)
+	for (int i = 0; i < TAPlayerCount(); ++i)
 	{
 		if (ta->Players[i].PlayerActive && (unsigned)ta->Players[i].DirectPlayID == fromDpid)
 		{
@@ -611,7 +611,7 @@ void RunAudit(TAdynmemStruct* ta, int gameTime)
 	const int cursor = g_viewCursor;
 	g_viewCursor = (g_viewCursor + 1) % kViewHistory;
 
-	for (int slot = 0; slot < 10; ++slot)
+	for (int slot = 0; slot < TAPlayerCount(); ++slot)
 	{
 		PlayerStruct& p = ta->Players[slot];
 		BlockView& view = g_localView[slot][cursor];
@@ -669,7 +669,7 @@ void OnGameTick(int /*unused*/)
 		return;
 
 	const int localSlot = ta->LocalHumanPlayer_PlayerID;
-	if (localSlot < 0 || localSlot >= 10)
+	if (localSlot < 0 || localSlot >= TAPlayerCount())
 		return;
 
 	// Sample on the same tick as everybody else, so the digests we exchange
@@ -683,7 +683,7 @@ void OnGameTick(int /*unused*/)
 		if (++g_auditCount % kHeartbeatEveryAudits == 0)
 		{
 			int agreeing = 0, blocks = 0;
-			for (int i = 0; i < 10; ++i)
+			for (int i = 0; i < TAPlayerCount(); ++i)
 			{
 				if (!FindView(i, gameTime)) continue;
 				++blocks;

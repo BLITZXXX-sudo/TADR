@@ -51,7 +51,7 @@ private:
 		int  lastSeenTimestamp;   // cached PlayerStruct.LastMsgTimeStamp value
 		DWORD lastReceiveTickMs;  // GetTickCount() when we last saw it change
 	};
-	PlayerTrack m_playerTrack[10];
+	PlayerTrack m_playerTrack[16];	// == TA_MAX_PLAYERS (tamem.h); live count is TAPlayerCount()
 
 	bool  m_frozen;
 	DWORD m_frozenSinceMs;

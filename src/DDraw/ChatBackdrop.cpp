@@ -216,7 +216,7 @@ void ChatBackdrop::Draw(_OFFSCREEN* offscreen)
 		{
 			// < 10, not != 10: any value above 10 is not a valid Players[]
 			// index either (matches ChatLayout.cpp's identical check).
-			const bool hasLogo = entry[OFF_STR_LOGO] < 10;
+			const bool hasLogo = entry[OFF_STR_LOGO] < TAPlayerCount();
 			const int  textX   = ChatTextX() + (hasLogo ? lineHeight : 0);
 			const int  textW   = MeasureChatLineWidth(entry, font);
 			if (textW > 0)

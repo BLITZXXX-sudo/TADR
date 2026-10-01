@@ -73,7 +73,7 @@ namespace
 	};
 
 	bool g_installed = false;
-	std::array<RemoteQueue, 10> g_remoteQueues;
+	std::array<RemoteQueue, TA_MAX_PLAYERS> g_remoteQueues;
 	std::vector<AlliedBuildQueueRecord> g_lastLocalQueue;
 	unsigned short g_nextSequence = 0;
 	unsigned g_sessionDpid = 0;
@@ -117,7 +117,7 @@ namespace
 
 	bool IsMutualAlly(TAdynmemStruct* ta, int first, int second)
 	{
-		if (!ta || first < 0 || first >= 10 || second < 0 || second >= 10 || first == second)
+		if (!ta || first < 0 || first >= TAPlayerCount() || second < 0 || second >= TAPlayerCount() || first == second)
 			return false;
 
 		return ta->Players[first].AllyFlagAry[second] != 0
@@ -158,7 +158,7 @@ namespace
 	{
 		std::set<AlliedBuildQueueRecord,
 			bool (*)(const AlliedBuildQueueRecord&, const AlliedBuildQueueRecord&)> records(RecordLess);
-		if (!ta || localSlot < 0 || localSlot >= 10
+		if (!ta || localSlot < 0 || localSlot >= TAPlayerCount()
 			|| !ta->BeginUnitsArray_p || !ta->EndOfUnitsArray_p || !ta->UnitDef)
 		{
 			return std::vector<AlliedBuildQueueRecord>();
@@ -364,7 +364,7 @@ namespace
 			return;
 
 		const int localSlot = ta->LocalHumanPlayer_PlayerID;
-		if (localSlot < 0 || localSlot >= 10)
+		if (localSlot < 0 || localSlot >= TAPlayerCount())
 			return;
 
 		PlayerStruct& local = ta->Players[localSlot];
@@ -373,7 +373,7 @@ namespace
 			ResetSession(localDpid, gameTime);
 		g_lastTick = gameTime;
 
-		for (int i = 0; i < 10; ++i)
+		for (int i = 0; i < TAPlayerCount(); ++i)
 		{
 			RemoteQueue& remote = g_remoteQueues[i];
 			if (!IsMutualAlly(ta, localSlot, i)
@@ -400,7 +400,7 @@ namespace
 		if (g_nextSequence == 0)
 			++g_nextSequence;
 
-		for (int i = 0; i < 10; ++i)
+		for (int i = 0; i < TAPlayerCount(); ++i)
 		{
 			PlayerStruct& target = ta->Players[i];
 			if (!target.PlayerActive || target.DirectPlayID == 0 || !target.PlayerInfo
@@ -440,7 +440,7 @@ namespace AlliedBuildQueueSync
 	const std::vector<AlliedBuildQueueRecord>& GetPlayerQueue(int playerSlot)
 	{
 		static const std::vector<AlliedBuildQueueRecord> empty;
-		if (playerSlot < 0 || playerSlot >= 10)
+		if (playerSlot < 0 || playerSlot >= TAPlayerCount())
 			return empty;
 		return g_remoteQueues[playerSlot].records;
 	}

@@ -132,7 +132,7 @@ std::string DebugPipeServer::ExecuteCommand(const std::string& line)
         std::string name;
         if (!(iss >> slot >> dpid)) return "ERR bad args";
         std::getline(iss >> std::ws, name);
-        if (slot < 0 || slot >= 10) return "ERR slot out of range";
+        if (slot < 0 || slot >= TAPlayerCount()) return "ERR slot out of range";
 
         TAdynmemStruct* ta = *(TAdynmemStruct**)0x00511de8;
         if (!ta) return "ERR taPtr null";
@@ -150,7 +150,7 @@ std::string DebugPipeServer::ExecuteCommand(const std::string& line)
     {
         int slot;
         if (!(iss >> slot)) return "ERR bad args";
-        if (slot < 0 || slot >= 10) return "ERR slot out of range";
+        if (slot < 0 || slot >= TAPlayerCount()) return "ERR slot out of range";
 
         TAdynmemStruct* ta = *(TAdynmemStruct**)0x00511de8;
         if (!ta) return "ERR taPtr null";
@@ -164,7 +164,7 @@ std::string DebugPipeServer::ExecuteCommand(const std::string& line)
     {
         int slot;
         if (!(iss >> slot)) return "ERR bad args";
-        if (slot < 0 || slot >= 10) return "ERR slot out of range";
+        if (slot < 0 || slot >= TAPlayerCount()) return "ERR slot out of range";
 
         TAdynmemStruct* ta = *(TAdynmemStruct**)0x00511de8;
         if (!ta) return "ERR taPtr null";
@@ -303,7 +303,7 @@ std::string DebugPipeServer::ExecuteCommand(const std::string& line)
     {
         int slot, value;
         if (!(iss >> slot >> value)) return "ERR bad args";
-        if (slot < 0 || slot >= 10) return "ERR slot out of range";
+        if (slot < 0 || slot >= TAPlayerCount()) return "ERR slot out of range";
         TAdynmemStruct* ta = *(TAdynmemStruct**)0x00511de8;
         if (!ta) return "ERR taPtr null";
         ta->Players[slot].LastMsgTimeStamp = value;
@@ -345,7 +345,7 @@ std::string DebugPipeServer::ExecuteCommand(const std::string& line)
         if (!ta) return "ERR taPtr null";
         unsigned myDpid = ta->Players[ta->LocalHumanPlayer_PlayerID].DirectPlayID;
         int count = 0;
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < TAPlayerCount(); ++i)
         {
             PlayerStruct& p = ta->Players[i];
             if (!p.PlayerActive || p.DirectPlayID == 0 || p.DirectPlayID == myDpid) continue;
@@ -369,7 +369,7 @@ std::string DebugPipeServer::ExecuteCommand(const std::string& line)
     {
         int slot;
         if (!(iss >> slot)) return "ERR bad args";
-        if (slot < 0 || slot >= 10) return "ERR slot out of range";
+        if (slot < 0 || slot >= TAPlayerCount()) return "ERR slot out of range";
         TAdynmemStruct* ta = *(TAdynmemStruct**)0x00511de8;
         if (!ta) return "ERR taPtr null";
         PlayerStruct& p = ta->Players[slot];
@@ -389,7 +389,7 @@ std::string DebugPipeServer::ExecuteCommand(const std::string& line)
     {
         int slotA, slotB, val;
         if (!(iss >> slotA >> slotB >> val)) return "ERR bad args";
-        if (slotA < 0 || slotA >= 10 || slotB < 0 || slotB >= 10) return "ERR slot out of range";
+        if (slotA < 0 || slotA >= TAPlayerCount() || slotB < 0 || slotB >= TAPlayerCount()) return "ERR slot out of range";
         TAdynmemStruct* ta = *(TAdynmemStruct**)0x00511de8;
         if (!ta) return "ERR taPtr null";
         ta->Players[slotA].AllyFlagAry[slotB] = (char)val;

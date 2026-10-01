@@ -1050,7 +1050,7 @@ void CBuildGhost::RenderGhostAtCurrentBuildSpot(bool showNag)
         && UnitDefExtensions::GetInstance()->getInt(buildIdx, g_previewFaceOpponentKeyIdx) != 0)
     {
         int myIdx = ta->LocalHumanPlayer_PlayerID;
-        if (myIdx >= 0 && myIdx < 10)
+        if (myIdx >= 0 && myIdx < TAPlayerCount())
         {
             PlayerStruct* me = &ta->Players[myIdx];
 
@@ -1085,7 +1085,7 @@ void CBuildGhost::RenderGhostAtCurrentBuildSpot(bool showNag)
                 int       bestDx     = 0;
                 int       bestDy     = 0;
                 bool      foundEnemy = false;
-                for (int i = 0; i < 10; ++i)
+                for (int i = 0; i < TAPlayerCount(); ++i)
                 {
                     if (i == myIdx) continue;
                     PlayerStruct* other = &ta->Players[i];
@@ -1150,7 +1150,7 @@ void CBuildGhost::RenderGhostAtCurrentBuildSpot(bool showNag)
 
     unsigned char previewPlayerColor = 0xFF;
     const int localPlayer = ta->LocalHumanPlayer_PlayerID;
-    if (localPlayer >= 0 && localPlayer < 10 && ta->Players[localPlayer].PlayerInfo)
+    if (localPlayer >= 0 && localPlayer < TAPlayerCount() && ta->Players[localPlayer].PlayerInfo)
     {
         const unsigned char color = ta->Players[localPlayer].PlayerInfo->PlayerLogoColor;
         if (color < 10) previewPlayerColor = color;

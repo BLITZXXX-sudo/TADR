@@ -45,7 +45,7 @@ namespace PlayerMute
 	};
 
 	// Slot 10 is the system sentinel and can never be muted.
-	const int kMaxPlayers  = 10;
+	const int kMaxPlayers  = 16;	// == TA_MAX_PLAYERS (tamem.h)	// capacity; live count is TAPlayerCount()
 	const int kSystemSlot  = 10;
 
 	// Installs the chat-ring filter (0x463CA0) and the local command

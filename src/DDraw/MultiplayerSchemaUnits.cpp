@@ -299,10 +299,14 @@ MultiplayerSchemaUnits::MultiplayerSchemaUnits():
 {
 	std::fill(m_startPositionsByPlayer, m_startPositionsByPlayer + 10, -1);
 	std::fill(m_playersByStartPosition, m_playersByStartPosition + 10, -1);
-	m_hooks.push_back(std::make_shared<InlineSingleHook>(SkirmishSpawnPlayerCommanderHookAddr, 5, INLINE_5BYTESLAGGERJMP, SkirmishSpawnPlayerCommanderHookProc));
-	m_hooks.push_back(std::make_shared<InlineSingleHook>(MultiplayerSpawnPlayerCommanderHookAddr, 5, INLINE_5BYTESLAGGERJMP, MultiplayerSpawnPlayerCommanderHookProc));
-	m_hooks.push_back(std::make_shared<InlineSingleHook>(BattleroomStartButtonHookAddr, 5, INLINE_5BYTESLAGGERJMP, BattleroomStartButtonHookProc));
-	m_hooks.push_back(std::make_shared<InlineSingleHook>(InitMissionUnitSpawnQueueAddr, 5, INLINE_5BYTESLAGGERJMP, InitMissionUnitSpawnQueueProc));
+	// Reads 10-player stack frames in the spawn code; stays off on the 16-player exe.
+	if (!TAIs16P())
+	{
+		m_hooks.push_back(std::make_shared<InlineSingleHook>(SkirmishSpawnPlayerCommanderHookAddr, 5, INLINE_5BYTESLAGGERJMP, SkirmishSpawnPlayerCommanderHookProc));
+		m_hooks.push_back(std::make_shared<InlineSingleHook>(MultiplayerSpawnPlayerCommanderHookAddr, 5, INLINE_5BYTESLAGGERJMP, MultiplayerSpawnPlayerCommanderHookProc));
+		m_hooks.push_back(std::make_shared<InlineSingleHook>(BattleroomStartButtonHookAddr, 5, INLINE_5BYTESLAGGERJMP, BattleroomStartButtonHookProc));
+		m_hooks.push_back(std::make_shared<InlineSingleHook>(InitMissionUnitSpawnQueueAddr, 5, INLINE_5BYTESLAGGERJMP, InitMissionUnitSpawnQueueProc));
+	}
 
 	GameTickHook::GetInstance()->addCallback(&SpawnLaterUnits);
 

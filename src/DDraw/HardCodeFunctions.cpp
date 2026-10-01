@@ -20,9 +20,9 @@ int ViewPlayerLos_Replay (int PlayerAryIndex, BOOL HaveControl)
 	//PTR1->LOS_Sight_PlayerID= 0;
 	char Curt_LOS_Sight_PlayerID= PTR1->LOS_Sight_PlayerID;
 
-	if (PlayerAryIndex<10
+	if (PlayerAryIndex<TAPlayerCount()
 		&&(0!=PTR1->Players[PlayerAryIndex].PlayerActive)
-		&& (10!=PTR1->Players[PlayerAryIndex].PlayerAryIndex))
+		&& (TANoPlayerIndex()!=PTR1->Players[PlayerAryIndex].PlayerAryIndex))
 	{//valid player ID
 		unsigned char CurtPlayerType= PTR1->Players[PlayerAryIndex].My_PlayerType;
 
@@ -244,7 +244,7 @@ LPDWORD GetUnitIDMaskAryByCategory (LPSTR CategoryName_cstrp)
 
 unsigned char GetPlayerDotColor(int n)
 {
-	if (n < 0 || n >= 10) {
+	if (n < 0 || n >= TAPlayerCount()) {
 		return 0u;
 	}
 
@@ -571,7 +571,7 @@ void GetWeatherReport(int& _solar, int& windPower, int & windPowerMin, int & win
 PlayerStruct* FindPlayerByName(const char* name)
 {
 	TAdynmemStruct* ptrMain = *(TAdynmemStruct**)0x0511DE8;
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		if (ptrMain->Players[n].PlayerActive && !strcmpi(ptrMain->Players[n].Name, name))
 		{
@@ -584,7 +584,7 @@ PlayerStruct* FindPlayerByName(const char* name)
 PlayerStruct* FindPlayerByDPID(unsigned dpid)
 {
 	TAdynmemStruct* ptrMain = *(TAdynmemStruct**)0x0511DE8;
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		if (ptrMain->Players[n].PlayerActive && ptrMain->Players[n].DirectPlayID == dpid)
 		{
@@ -597,7 +597,7 @@ PlayerStruct* FindPlayerByDPID(unsigned dpid)
 PlayerStruct* FindPlayerByPlayerNum(int playerNum)
 {
 	TAdynmemStruct* ptrMain = *(TAdynmemStruct**)0x0511DE8;
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		if (ptrMain->Players[n].PlayerActive && ptrMain->Players[n].PlayerNum == playerNum && InferredPlayerTypeIsHuman(&ptrMain->Players[n])) {
 			return &ptrMain->Players[n];

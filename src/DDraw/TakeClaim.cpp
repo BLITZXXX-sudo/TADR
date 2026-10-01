@@ -66,7 +66,7 @@ constexpr int kFinishDelayTicks = 6;
 constexpr int kTickSkewTolerance = 2 * kSettleTicks;
 
 constexpr unsigned TA_MAIN_PTR_ADDR = 0x00511de8;
-constexpr unsigned kMaxPlayers      = 10;
+constexpr unsigned kMaxPlayers      = TA_MAX_PLAYERS;	// capacity; live count is TAPlayerCount()
 
 // _ShowText — the single choke point for OUTGOING chat; every route to '.take'
 // converges here. dplayx sits below the HAPI layer and only sees the command
@@ -212,7 +212,7 @@ PlayerStruct* ResolvePlayerByName(const char* name, bool* ambiguous)
     int prefixCount = 0;
 
     const size_t n = std::strlen(name);
-    for (unsigned i = 0; i < kMaxPlayers; ++i)
+    for (unsigned i = 0; i < (unsigned)TAPlayerCount(); ++i)
     {
         PlayerStruct* p = &ta->Players[i];
         if (!p->PlayerActive || !p->Name[0]) continue;
@@ -230,7 +230,7 @@ PlayerStruct* ResolvePlayerByName(const char* name, bool* ambiguous)
 // AllyTeam is 5+ when no battleroom team was selected.
 bool TeamsInUse(TAdynmemStruct* ta)
 {
-    for (unsigned i = 0; i < kMaxPlayers; ++i)
+    for (unsigned i = 0; i < (unsigned)TAPlayerCount(); ++i)
         if (IsPlayable(&ta->Players[i]) && ta->Players[i].AllyTeam < 5)
             return true;
     return false;
@@ -251,7 +251,7 @@ bool AlliedForTake(TAdynmemStruct* ta, PlayerStruct* me, PlayerStruct* other)
 
     const int mine  = me->PlayerAryIndex;
     const int theirs = other->PlayerAryIndex;
-    if (mine < 0 || mine >= (int)kMaxPlayers || theirs < 0 || theirs >= (int)kMaxPlayers)
+    if (mine < 0 || mine >= TAPlayerCount() || theirs < 0 || theirs >= TAPlayerCount())
         return false;
     return me->AllyFlagAry[theirs] != 0 && other->AllyFlagAry[mine] != 0;
 }
@@ -328,7 +328,7 @@ void CollectEligibleTargets(std::vector<PlayerStruct*>& out)
     TAdynmemStruct* ta = GetTA();
     if (!ta) return;
     char reason[192];
-    for (unsigned i = 0; i < kMaxPlayers; ++i)
+    for (unsigned i = 0; i < (unsigned)TAPlayerCount(); ++i)
     {
         PlayerStruct* p = &ta->Players[i];
         if (!p->PlayerActive) continue;

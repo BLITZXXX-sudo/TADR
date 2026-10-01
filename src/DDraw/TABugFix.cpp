@@ -384,7 +384,7 @@ int __stdcall GhostComFixAssistProc(PInlineX86StackBuffer X86StrackBuffer)
 
 	if (taPtr->GameTime == 90) // 3 secs
 	{
-		for (int iPlayer = 0; iPlayer < 10; ++iPlayer)
+		for (int iPlayer = 0; iPlayer < TAPlayerCount(); ++iPlayer)
 		{
 			PlayerStruct* p = &taPtr->Players[iPlayer];
 			if (p->PlayerActive &&
@@ -503,12 +503,12 @@ struct UnitIdFreeList
 	}
 };
 
-static UnitIdFreeList unitIdFreeList[10];
+static UnitIdFreeList unitIdFreeList[TA_MAX_PLAYERS];
 
 static void UnitIdFreeList_SyncSize(const TAdynmemStruct* taPtr)
 {
 	const unsigned nIds = taPtr->PlayerUnitsNumber_Skim;
-	for (int i = 0; i < 10; ++i) {
+	for (int i = 0; i < TAPlayerCount(); ++i) {
 		if (taPtr->GameTime == 0 || unitIdFreeList[i].ring.size() != nIds) {
 			unitIdFreeList[i].Reset(nIds);
 		}
@@ -543,7 +543,7 @@ int __stdcall FixFactoryExplosionsAssignUnitIdProc(PInlineX86StackBuffer X86Stra
 	}
 
 	int assigned = -1;
-	if (unsigned(playerIndex) >= 10) {
+	if (unsigned(playerIndex) >= unsigned(TAPlayerCount())) {
 		// Shouldn't happen; fall back to stock lowest-free rather than refuse to create.
 		for (unsigned n = 0; n < nIds; ++n) {
 			if (0 == player->Units[n].UnitID) {
@@ -615,7 +615,7 @@ int __stdcall FixFactoryExplosionsRecycleUnitIdProc(PInlineX86StackBuffer X86Str
 		IDDrawSurface::OutptFmtTxt("[FixFactoryExplosionsRecycleUnitIdProc] UnitInGameIndex misatch! packet:%d, unit:%d\n",
 			unitInGameIndex, unit->UnitInGameIndex);
 	}
-	else if (unit->OwnerIndex < 0 || unit->OwnerIndex >= 10) {
+	else if (unit->OwnerIndex < 0 || unit->OwnerIndex >= TAPlayerCount()) {
 		IDDrawSurface::OutptFmtTxt("[FixFactoryExplosionsRecycleUnitIdProc] Invalid unit->OwnerIndex:%d\n", unit->OwnerIndex);
 	}
 	else {
@@ -1680,7 +1680,7 @@ static void WriteGameStateSnapshot(FILE* f)
 	if (!SafeIsBadReadPtr(&ta->GameingState_Ptr, 4) && ta->GameingState_Ptr &&
 		!SafeIsBadReadPtr(ta->GameingState_Ptr, 4))
 		fprintf(f, "GameingState.State=%d\n", ta->GameingState_Ptr->State);
-	for (int i = 0; i < 10; ++i)
+	for (int i = 0; i < TAPlayerCount(); ++i)
 	{
 		PlayerStruct* p = &ta->Players[i];
 		if (SafeIsBadReadPtr(p, sizeof(PlayerStruct))) continue;
@@ -2310,14 +2310,14 @@ int __stdcall MultiplayerPlayerLostProc(PInlineX86StackBuffer X86StrackBuffer)
     if (ta)
     {
         // Same test TA uses: a slot with Controller 0 is not a player.
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i < TAPlayerCount(); ++i)
             if (ta->Players[i].My_PlayerType != 0 &&
                 (unsigned)ta->Players[i].DirectPlayID == dpid)
                 return 0;                       // found: let TA announce it
     }
     IDDrawSurface::OutptFmtTxt(
         "[TABugFix] suppressed MultiplayerPlayerLost for unknown dpid %08x"
-        " (would have read Player_Ary[10])", dpid);
+        " (would have read past Player_Ary)", dpid);
     X86StrackBuffer->rtnAddr_Pvoid = (LPVOID)&MultiplayerPlayerLostSuppressStub;
     return X86STRACKBUFFERCHANGE;
 }
@@ -2371,6 +2371,8 @@ int __stdcall NewChatTextGuardProc(PInlineX86StackBuffer X86StrackBuffer)
 
 TABugFixing::TABugFixing ()
 {
+	IDDrawSurface::OutptFmtTxt("[TA16P] player table: %d slots at TAdynmem+0x%X%s", TAPlayerCount(), g_TAPlayersOffset,
+		TAIs16P() ? " (16-player exe)" : "");
 
 	MaxUnitID= 0;
 
@@ -2908,14 +2910,16 @@ int __stdcall LeaveProc  (PInlineX86StackBuffer X86StrackBuffer)
 	return 0;
 }
 
-static PlayerInfoStruct* SavePlayerColorPtr[10] = { NULL };
-static char SavePlayerColor[10] = { 0 };
+static PlayerInfoStruct* SavePlayerColorPtr[TA_MAX_PLAYERS] = { NULL };
+static char SavePlayerColor[TA_MAX_PLAYERS] = { 0 };
 int __stdcall SavePlayerColorProc(PInlineX86StackBuffer X86StrackBuffer)
 {
 	unsigned char playerNumber = *(unsigned char*)(X86StrackBuffer->Esp + 0x44);
-	if (playerNumber < 10) {
-		SavePlayerColorPtr[playerNumber] = (PlayerInfoStruct*)(*(unsigned*)(X86StrackBuffer->Eax + 0x1b8a));
-		SavePlayerColor[playerNumber] = SavePlayerColorPtr[playerNumber]->PlayerLogoColor;
+	if (playerNumber < TAPlayerCount()) {
+		// EAX = TAdynmem + slot*0x14B here; +0x27 is PlayerStruct.PlayerInfo
+		SavePlayerColorPtr[playerNumber] = (PlayerInfoStruct*)(*(unsigned*)(X86StrackBuffer->Eax + g_TAPlayersOffset + 0x27));
+		if (SavePlayerColorPtr[playerNumber])
+			SavePlayerColor[playerNumber] = SavePlayerColorPtr[playerNumber]->PlayerLogoColor;
 	}
 	return 0;
 }
@@ -2924,7 +2928,7 @@ int __stdcall RestorePlayerColorProc(PInlineX86StackBuffer X86StrackBuffer)
 {
 	if (DataShare->TAProgress == TAInGame && SavePlayerColorPtr != NULL) {
 		unsigned char playerNumber = *(unsigned char*)(X86StrackBuffer->Esp + 0x44);
-		if (playerNumber < 10) {
+		if (playerNumber < TAPlayerCount() && SavePlayerColorPtr[playerNumber]) {
 			SavePlayerColorPtr[playerNumber]->PlayerLogoColor = SavePlayerColor[playerNumber];
 		}
 	}

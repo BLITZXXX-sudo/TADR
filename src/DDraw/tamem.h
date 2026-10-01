@@ -10,6 +10,22 @@ struct _GAFFrame;
 
 #pragma pack(1)
 
+// ---------------------------------------------------------------------------
+// 16-player exe support.
+// The 16-player TotalA.exe moves the player table from TAdynmem+0x1B63
+// (10 entries) to TAdynmem+0x3A000 (16 entries, same 0x14B stride), and its
+// "no player" index is 0xFF instead of 10. TA16P.cpp looks at the exe once at
+// load time and sets these; on a stock exe they keep the stock values.
+// Use TAPlayerCount() for loops and range checks, TA_MAX_PLAYERS for arrays.
+// ---------------------------------------------------------------------------
+#define TA_MAX_PLAYERS (16)
+extern int g_TAPlayerCount;          // 10 (stock) or 16
+extern unsigned g_TAPlayersOffset;   // 0x1B63 (stock) or 0x3A000
+inline int TAPlayerCount() { return g_TAPlayerCount; }
+inline bool TAIs16P() { return g_TAPlayerCount > 10; }
+inline char TANoPlayerIndex() { return TAIs16P() ? (char)0xFF : (char)10; }
+void TA16P_Detect();
+
 
 
 enum PlayerType;
@@ -156,10 +172,8 @@ struct PlayerStruct
 	int field_8D;             // PS+0x100 / Controller+0x8D
 	__int16 Kills_Last;       // PS+0x104 / Controller+0x91
 	__int16 Losses_Last;      // PS+0x106 / Controller+0x93
-	char AllyFlagAry[10];
-	char field_112;
-	char field_113;
-	char field_114[21];
+	char AllyFlagAry[16];       // 0x108: stock TA uses 10, the 16-player exe 16
+	char field_118[17];
 	char field_129;
 	char field_12A[21];
 	char AllyTeam;
@@ -413,7 +427,11 @@ struct TAdynmemStruct{
 	char data2b[0x3c];			// 0x04dd   ..  0x0519
 	_GUIInfo desktopGUI;		// 0x0519
 	char data3[0x97C];
-	PlayerStruct Players[10];	//0x1B63 , end at 0x2851
+	PlayerStruct PlayersStock[10];	//0x1B63 , end at 0x2851 (stock exe only - use Players)
+	// Players[i] resolves to the live table: +0x1B63 on the stock exe, +0x3A000 on
+	// the 16-player exe (see TA16P.cpp). No storage: it is a property.
+	PlayerStruct* GetPlayers() { return (PlayerStruct*)((char*)this + g_TAPlayersOffset); }
+	__declspec(property(get = GetPlayers)) PlayerStruct* Players;
 	char data4[331];			// 0x2851
 	unsigned int data5;			// 0x299c
 	SkirmishInfo* skirmishInfo;	// 0x29a0
@@ -1941,7 +1959,7 @@ enum class FeatureMasks
 	nodrawundergray = 0x0800
 };
 
-#define PLAYERNUM (10)
+#define PLAYERNUM (TA_MAX_PLAYERS)
 
 // Layout guards for the fields OffMapAircraft.cpp depends on: a shift here is a build error
 // rather than a silently wrong hook.

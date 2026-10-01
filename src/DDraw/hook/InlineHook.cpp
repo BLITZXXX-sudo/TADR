@@ -45,7 +45,7 @@ TempAddr:
 	__asm mov eax, Global_OffOfEnteredFlagFromInlineX86StackBuffer;
 	__asm mov eax, DWORD PTR [ebx+ eax]
 	__asm cmp eax, 0xbd88
-	__asm je AfterCallRouter
+	__asm je NestedEntry	// re-entered on this thread while the handler runs: just run the original code
 	__asm mov eax, Global_OffOfEnteredFlagFromInlineX86StackBuffer;
 	__asm mov DWORD PTR [ebx+ eax], 0xbd88
 	__asm mov ecx, 0x9 //多保存1个堆栈中的数据。以前写的0xa，不改了。
@@ -129,6 +129,9 @@ AfterCallRouter:
 	__asm mov DWORD PTR [ebx+ eax], 0//释放这个位置的标志
 	// EN: Release the entered-flag at this position
 
+NestedEntry:
+	// A nested entry must leave the flag (and the saved copy) alone: they belong
+	// to the outer call, which is still running and clears the flag itself.
 	__asm popfd
 	__asm popad;
 	//这儿的没返回，是为以后放原始代码+ jmp/call返回的代码用的。
@@ -145,7 +148,11 @@ PInlineX86StackBuffer __stdcall X86CurrentThreadStackBufferFixRtnAddr (PInlineX8
 	{
 		if (ThreadID_Dw==temp_Pix86Stackbuf->TID_Dw)
 		{
-			temp_Pix86Stackbuf->rtnAddr_Pvoid= temp_Pix86Stackbuf->myInlineHookClass_Pish->RtnAddrOfHook();
+			// Nested entry (flag still set by the outer call): keep the outer's return address.
+			if (0xbd88!=temp_Pix86Stackbuf->EnteredFlag_I)
+			{
+				temp_Pix86Stackbuf->rtnAddr_Pvoid= temp_Pix86Stackbuf->myInlineHookClass_Pish->RtnAddrOfHook();
+			}
 			return temp_Pix86Stackbuf;
 		}
 		temp_Pix86Stackbuf= temp_Pix86Stackbuf->next;

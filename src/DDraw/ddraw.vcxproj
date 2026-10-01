@@ -358,6 +358,7 @@ if NOT "$(LocalDebuggerWorkingDirectory)" == "$(ProjectDir)" if exist "$(LocalDe
     <ClCompile Include="LagSwitchGuard.cpp" />
     <ClCompile Include="VoteReject.cpp" />
     <ClCompile Include="ShareGuard.cpp" />
+    <ClCompile Include="TA16P.cpp" />
     <ClCompile Include="TakeClaim.cpp" />
     <ClCompile Include="VeterancyHack.cpp" />
     <ClCompile Include="Widgets\Button.cpp" />

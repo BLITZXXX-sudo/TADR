@@ -64,7 +64,7 @@ constexpr unsigned UNIT_STATE_ALIVE = 0x10000000u;
 // awaiting dispatch" flag set by UnitTakeDamage_packet.
 constexpr unsigned UNIT_STATE_PENDING_DEATH = 0x4000u;
 
-constexpr unsigned kMaxPlayers = 10;
+constexpr unsigned kMaxPlayers = TA_MAX_PLAYERS;	// array capacity; live count is TAPlayerCount()
 
 // Layout guards. This module walks unit arrays by pointer arithmetic, indexes
 // TAdynmemStruct::Players, and reads fields whose offsets were verified against
@@ -82,7 +82,7 @@ static_assert(offsetof(UnitStruct, UnitSelected)    == 0x110, "UnitStruct.UnitSe
 static_assert(offsetof(UnitDefStruct, bmcode)       == 0x22F, "UnitDefStruct.bmcode");
 static_assert(offsetof(TAdynmemStruct, ActiveCommanderDeath) == 0x37EF6,
               "TAdynmemStruct.ActiveCommanderDeath");
-static_assert(offsetof(TAdynmemStruct, Players)     == 0x1B63, "TAdynmemStruct.Players");
+static_assert(offsetof(TAdynmemStruct, PlayersStock) == 0x1B63, "TAdynmemStruct.Players");
 
 // ---- state -----------------------------------------------------------------
 
@@ -396,7 +396,7 @@ bool ShouldSuppressGive(void* srcUnit, void* targetPlayer, const void* givePkt)
 
     PlayerStruct* target = reinterpret_cast<PlayerStruct*>(targetPlayer);
     const int targetSlot = (int)(target - ta->Players);
-    if (targetSlot < 0 || targetSlot >= (int)kMaxPlayers) return false;
+    if (targetSlot < 0 || targetSlot >= TAPlayerCount()) return false;
 
     // Collect, don't decide. The block is sized and ruled on in the
     // GiveSelectUnits return thunk (FinishPlayerShare), which re-issues it

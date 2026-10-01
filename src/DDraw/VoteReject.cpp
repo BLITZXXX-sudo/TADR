@@ -39,7 +39,7 @@ static _GameRunSec GameRunSec_fn = (_GameRunSec)0x004b6340;
 
 static bool AreAllies(TAdynmemStruct* taPtr, int slotA, int slotB)
 {
-	if (slotA < 0 || slotB < 0 || slotA >= 10 || slotB >= 10 || slotA == slotB)
+	if (slotA < 0 || slotB < 0 || slotA >= TAPlayerCount() || slotB >= TAPlayerCount() || slotA == slotB)
 		return false;
 	return taPtr->Players[slotA].AllyFlagAry[slotB] != 0
 		&& taPtr->Players[slotB].AllyFlagAry[slotA] != 0;
@@ -77,7 +77,7 @@ static bool CanCastVote(TAdynmemStruct* taPtr, int slot, int gameNow)
 
 static int FindSlotByDpid(TAdynmemStruct* taPtr, unsigned dpid)
 {
-	for (int i = 0; i < 10; ++i)
+	for (int i = 0; i < TAPlayerCount(); ++i)
 		if (taPtr->Players[i].PlayerActive && taPtr->Players[i].DirectPlayID == dpid)
 			return i;
 	return -1;
@@ -176,7 +176,7 @@ int __stdcall VoteReject::YesNoRejectRouter(PInlineX86StackBuffer pBuf)
 		return 0;
 
 	BYTE playerIndex = *((BYTE*)0x00505510);
-	if (playerIndex < 10
+	if (playerIndex < TAPlayerCount()
 		&& taPtr->Players[playerIndex].PlayerActive
 		&& taPtr->Players[playerIndex].DirectPlayID != 0)
 	{
@@ -226,7 +226,7 @@ int __stdcall VoteReject::YesNoNoRouter(PInlineX86StackBuffer pBuf)
 
 	BYTE playerIndex = *((BYTE*)0x00505510);
 	TAdynmemStruct* taPtr = *(TAdynmemStruct**)0x00511de8;
-	if (playerIndex >= 10 || !taPtr->Players[playerIndex].PlayerActive)
+	if (playerIndex >= TAPlayerCount() || !taPtr->Players[playerIndex].PlayerActive)
 		return 0;
 
 	unsigned targetDpid = taPtr->Players[playerIndex].DirectPlayID;
@@ -331,7 +331,7 @@ int __stdcall VoteReject::MultiDropoutRouter(PInlineX86StackBuffer pBuf)
 		if (taPtr)
 		{
 			int threshold = (int)taPtr->NetworkDropoutTimeoutSec * 30;
-			for (int i = 0; i < 10; ++i)
+			for (int i = 0; i < TAPlayerCount(); ++i)
 			{
 				PlayerStruct& p = taPtr->Players[i];
 				if (!p.PlayerActive || p.DirectPlayID == 0)
@@ -403,7 +403,7 @@ void VoteReject::OnReceive(unsigned fromDpid, const VoteRejectMessage& msg)
 		state.votingClosed = false;
 
 		TAdynmemStruct* taPtr = *(TAdynmemStruct**)0x00511de8;
-		for (int i = 0; i < 10; ++i) {
+		for (int i = 0; i < TAPlayerCount(); ++i) {
 			if (taPtr->Players[i].DirectPlayID == msg.targetDpid) {
 				state.targetSlot = i;
 				state.lastMsgTimeStampAtProposal = taPtr->Players[i].LastMsgTimeStamp;
@@ -508,7 +508,7 @@ void VoteReject::ProposeReject(unsigned targetDpid, char rejectMask)
 	state.lastMsgTimeStampAtProposal = 0;
 	state.hudLineId    = INVALID_HUD_LINE_ID;
 	state.votingClosed = false;
-	for (int i = 0; i < 10; ++i) {
+	for (int i = 0; i < TAPlayerCount(); ++i) {
 		if (taPtr->Players[i].DirectPlayID == targetDpid) {
 			state.targetSlot = i;
 			state.lastMsgTimeStampAtProposal = taPtr->Players[i].LastMsgTimeStamp;
@@ -577,7 +577,7 @@ VoteReject::VoteTally VoteReject::ComputeTally(unsigned targetDpid, const VoteSt
 	t.noVotes  = (int)state.noVoters.size();
 
 	t.eligibleVoters = 0;
-	for (int i = 0; i < 10; ++i) {
+	for (int i = 0; i < TAPlayerCount(); ++i) {
 		if (taPtr->Players[i].DirectPlayID == targetDpid) continue;
 		if (!CanCastVote(taPtr, i, gameNow)) continue;
 		++t.eligibleVoters;
@@ -594,7 +594,7 @@ VoteReject::VoteTally VoteReject::ComputeTally(unsigned targetDpid, const VoteSt
 	t.teammateConsent   = true;
 	t.needsTeammateVote = false;
 	if (state.targetSlot >= 0) {
-		for (int i = 0; i < 10; ++i) {
+		for (int i = 0; i < TAPlayerCount(); ++i) {
 			if (!CanCastVote(taPtr, i, gameNow)) continue;
 			if (!AreAllies(taPtr, state.targetSlot, i)) continue;
 			unsigned allyDpid = taPtr->Players[i].DirectPlayID;
@@ -1095,7 +1095,7 @@ void VoteReject::GetActiveVotes(std::vector<VoteDisplayInfo>& out) const
 		info.isAllyOfLocal = false;
 		if (s.rejectMask == 6 && s.targetSlot >= 0) {
 			int localSlot = (int)(unsigned char)taPtr->LocalHumanPlayer_PlayerID;
-			if (localSlot >= 0 && localSlot < 10)
+			if (localSlot >= 0 && localSlot < TAPlayerCount())
 				info.isAllyOfLocal = AreAllies(taPtr, localSlot, s.targetSlot);
 		}
 

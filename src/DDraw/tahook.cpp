@@ -1843,7 +1843,7 @@ void CTAHook::VisualizeAlliedQueuedBuilds()
 	}
 
 	const int localPlayerId = TAdynmem->LocalHumanPlayer_PlayerID;
-	if (localPlayerId < 0 || localPlayerId >= 10 || !TAdynmem->BeginUnitsArray_p
+	if (localPlayerId < 0 || localPlayerId >= TAPlayerCount() || !TAdynmem->BeginUnitsArray_p
 		|| !TAdynmem->EndOfUnitsArray_p || !TAdynmem->UnitDef)
 	{
 		return;
@@ -1873,7 +1873,7 @@ void CTAHook::VisualizeAlliedQueuedBuilds()
 	{
 		PlayerStruct* owner = hoveredUnit->Owner_PlayerPtr0 ? hoveredUnit->Owner_PlayerPtr0 : hoveredUnit->Owner_PlayerPtr1;
 		const int ownerId = owner ? owner->PlayerAryIndex : -1;
-		preferAlliedOverlap = owner && ownerId >= 0 && ownerId < 10 && ownerId != localPlayerId
+		preferAlliedOverlap = owner && ownerId >= 0 && ownerId < TAPlayerCount() && ownerId != localPlayerId
 			&& TAdynmem->Players[localPlayerId].AllyFlagAry[ownerId] != 0;
 	}
 
@@ -1916,7 +1916,7 @@ void CTAHook::VisualizeAlliedQueuedBuilds()
 		if (!owner)
 			continue;
 		const int ownerId = owner->PlayerAryIndex;
-		if (ownerId < 0 || ownerId >= 10 || ownerId == localPlayerId
+		if (ownerId < 0 || ownerId >= TAPlayerCount() || ownerId == localPlayerId
 			|| TAdynmem->Players[localPlayerId].AllyFlagAry[ownerId] == 0)
 		{
 			continue;
@@ -1932,7 +1932,7 @@ void CTAHook::VisualizeAlliedQueuedBuilds()
 		}
 	}
 
-	for (int ownerId = 0; ownerId < 10; ++ownerId)
+	for (int ownerId = 0; ownerId < TAPlayerCount(); ++ownerId)
 	{
 		if (ownerId == localPlayerId || TAdynmem->Players[localPlayerId].AllyFlagAry[ownerId] == 0)
 			continue;

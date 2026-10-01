@@ -178,7 +178,7 @@ static unsigned int TeamMessageDispatchHookProc(PInlineX86StackBuffer X86StrackB
 					// TEAM24 is in-flight at a time (no intermediate stale-AllyTeam problem).
 					// It is suppressed by TEAM24_NO_CASCADE for autoteam, where the host's
 					// explicit ALLY23 pass handles everything instead.
-					for (int n = 0; n < 10; ++n)
+					for (int n = 0; n < TAPlayerCount(); ++n)
 					{
 						PlayerStruct* localPlayer = &ta->Players[n];
 						if (localPlayer->PlayerActive &&
@@ -221,22 +221,22 @@ static void __stdcall InternalCommand_autoteam(char *argv[])
 	int* PTR = (int*)0x00511de8;
 	TAdynmemStruct* ta = (TAdynmemStruct*)(*PTR);
 
-	int isActivePlayer[10];
-	int startPositions[10];
+	int isActivePlayer[TA_MAX_PLAYERS] = { 0 };
+	int startPositions[TA_MAX_PLAYERS] = { 0 };
 	if (!StartPositions::GetInstance()->GetInitedStartPositions(isActivePlayer, startPositions))
 	{
 		SendText("+autoteam is only available to the host of a multiplayer game", 0);
 		return;
 	}
 
-	int countActivePlayers = std::accumulate(isActivePlayer, isActivePlayer + 10, 0);
+	int countActivePlayers = std::accumulate(isActivePlayer, isActivePlayer + TAPlayerCount(), 0);
 	if (countActivePlayers < 2)
 	{
 		SendText("+autoteam not available b/c too few players", 0);
 		return;
 	}
 
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		if (ta->Players[n].PlayerActive && ta->Players[n].AllyTeam < 5 && !(ta->Players[n].PlayerInfo->PropertyMask & WATCH))
 		{
@@ -245,13 +245,13 @@ static void __stdcall InternalCommand_autoteam(char *argv[])
 		}
 	}
 
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		if (!isActivePlayer[n])
 		{
 			continue;
 		}
-		for (int m = 0; m < 10; ++m)
+		for (int m = 0; m < TAPlayerCount(); ++m)
 		{
 			if (m == n || !isActivePlayer[m])
 			{
@@ -286,12 +286,12 @@ static void SetBattleroomTeamsAndAlliances(const StartPositionsData& spd, int te
 	// TA's native TEAM24 handler does not clear AllyFlagAry, so stale alliances from
 	// previous manual selections or a prior +autoteam can linger.  Explicitly clearing
 	// them first ensures the subsequent ALLY23 pass writes a clean authoritative state.
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		PlayerStruct* pn = &ta->Players[n];
 		if (!pn->PlayerActive || (pn->PlayerInfo->PropertyMask & WATCH))
 			continue;
-		for (int m = n + 1; m < 10; ++m)
+		for (int m = n + 1; m < TAPlayerCount(); ++m)
 		{
 			PlayerStruct* pm = &ta->Players[m];
 			if (!pm->PlayerActive || (pm->PlayerInfo->PropertyMask & WATCH))
@@ -370,14 +370,15 @@ static void BattleroomAutoteamCommandHandler(const std::vector<std::string> &arg
 		sm = &_sm;
 
 		SendText("Autobalance not available. Setting random teams", 0);
-		int shuffle[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-		std::shuffle(shuffle, shuffle + 10, RNG);
+		int shuffle[TA_MAX_PLAYERS] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+		std::shuffle(shuffle, shuffle + TAPlayerCount(), RNG);
 
-		for (int n = 0; n < 10; ++n)
+		for (int n = 0; n < TAPlayerCount(); ++n)
 		{
 			int idx = shuffle[n];
 			if (ta->Players[idx].PlayerActive && !(ta->Players[idx].PlayerInfo->PropertyMask & WATCH))
 			{
+				if (_sm.positionCount >= 10) break;	// StartPositionsData holds 10 names
 				std::strncpy(_sm.orderedPlayerNames[_sm.positionCount], ta->Players[idx].Name, 32);
 				++_sm.positionCount;
 			}
@@ -412,14 +413,15 @@ static void BattleroomRandomteamCommandHandler(const std::vector<std::string>& a
 	StartPositionsData sm;
 	std::memset(&sm, 0, sizeof(sm));
 
-	int shuffle[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-	std::shuffle(shuffle, shuffle + 10, RNG);
+	int shuffle[TA_MAX_PLAYERS] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+	std::shuffle(shuffle, shuffle + TAPlayerCount(), RNG);
 
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		int idx = shuffle[n];
 		if (ta->Players[idx].PlayerActive && !(ta->Players[idx].PlayerInfo->PropertyMask & WATCH))
 		{
+			if (sm.positionCount >= 10) break;	// StartPositionsData holds 10 names
 			std::strncpy(sm.orderedPlayerNames[sm.positionCount], ta->Players[idx].Name, 32);
 			++sm.positionCount;
 		}
@@ -449,7 +451,7 @@ static unsigned int AlliancesBroadcastHookProc(PInlineX86StackBuffer X86StrackBu
 		return 0;
 	}
 
-	for (int n = 0; n < 10; ++n)
+	for (int n = 0; n < TAPlayerCount(); ++n)
 	{
 		// for every other player
 		PlayerStruct& remotePlayer = ta->Players[n];

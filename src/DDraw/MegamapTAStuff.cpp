@@ -46,7 +46,7 @@ namespace
 		DrawBpsFn drawBps = reinterpret_cast<DrawBpsFn>(kDrawBpsAddress);
 
 		const int localPlayerId = ta->LocalHumanPlayer_PlayerID;
-		PlayerInfoStruct* playerInfo = localPlayerId >= 0 && localPlayerId < 10
+		PlayerInfoStruct* playerInfo = localPlayerId >= 0 && localPlayerId < TAPlayerCount()
 			? ta->Players[localPlayerId].PlayerInfo
 			: NULL;
 		const int raceSide = playerInfo ? playerInfo->RaceSide : -1;
@@ -744,7 +744,7 @@ void MegamapTAStuff::DrawAlliedBuildQueues(OFFSCREEN* offscreen)
 	}
 
 	const int localPlayerId = TAmainStruct_Ptr->LocalHumanPlayer_PlayerID;
-	if (localPlayerId < 0 || localPlayerId >= 10)
+	if (localPlayerId < 0 || localPlayerId >= TAPlayerCount())
 		return;
 
 	set<pair<int, int> > ownQueuedBuilds;
@@ -776,7 +776,7 @@ void MegamapTAStuff::DrawAlliedBuildQueues(OFFSCREEN* offscreen)
 		PlayerStruct* owner = hovered->Owner_PlayerPtr0 ? hovered->Owner_PlayerPtr0 : hovered->Owner_PlayerPtr1;
 		const int ownerId = owner ? owner->PlayerAryIndex : -1;
 		preferAlliedOverlap = owner && hovered->UnitType && hovered->UnitType->CANBUILD_ptr
-			&& ownerId >= 0 && ownerId < 10 && ownerId != localPlayerId
+			&& ownerId >= 0 && ownerId < TAPlayerCount() && ownerId != localPlayerId
 			&& TAmainStruct_Ptr->Players[localPlayerId].AllyFlagAry[ownerId] != 0;
 	}
 
@@ -806,7 +806,7 @@ void MegamapTAStuff::DrawAlliedBuildQueues(OFFSCREEN* offscreen)
 		if (!owner)
 			continue;
 		const int ownerId = owner->PlayerAryIndex;
-		if (ownerId < 0 || ownerId >= 10 || ownerId == localPlayerId
+		if (ownerId < 0 || ownerId >= TAPlayerCount() || ownerId == localPlayerId
 			|| TAmainStruct_Ptr->Players[localPlayerId].AllyFlagAry[ownerId] == 0)
 		{
 			continue;
@@ -822,7 +822,7 @@ void MegamapTAStuff::DrawAlliedBuildQueues(OFFSCREEN* offscreen)
 		}
 	}
 
-	for (int ownerId = 0; ownerId < 10; ++ownerId)
+	for (int ownerId = 0; ownerId < TAPlayerCount(); ++ownerId)
 	{
 		if (ownerId == localPlayerId || TAmainStruct_Ptr->Players[localPlayerId].AllyFlagAry[ownerId] == 0)
 			continue;

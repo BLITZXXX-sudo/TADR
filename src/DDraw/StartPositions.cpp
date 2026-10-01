@@ -62,7 +62,7 @@ static unsigned int FixedStartPositionsHookProc(PInlineX86StackBuffer X86StrackB
 		return 0;
 	}
 
-	PlayerStruct* player = (PlayerStruct*)(X86StrackBuffer->Edx + X86StrackBuffer->Eax + 0x1b63);
+	PlayerStruct* player = (PlayerStruct*)(X86StrackBuffer->Edx + X86StrackBuffer->Eax + g_TAPlayersOffset);
 
 	*(char*)X86StrackBuffer->Esi = START_POSITIONS[player->PlayerAryIndex];
 
@@ -107,7 +107,9 @@ StartPositions::StartPositions():
 	m_hMemMap(NULL)
 {
 	CreateSharedMemory();
-	if (m_hMemMap && m_startPositionsShare)
+	// The 16-player exe assigns start positions itself (16 slots, its own stack
+	// frame and arrays), so these hooks stay off there.
+	if (m_hMemMap && m_startPositionsShare && !TAIs16P())
 	{
 		m_hooks.push_back(std::make_shared<InlineSingleHook>(InitStartPositionsHookAddr, 5, INLINE_5BYTESLAGGERJMP, InitStartPositionsHookProc));
 		m_hooks.push_back(std::make_shared<InlineSingleHook>(FixedStartPositionsHookAddr, 5, INLINE_5BYTESLAGGERJMP, FixedStartPositionsHookProc));

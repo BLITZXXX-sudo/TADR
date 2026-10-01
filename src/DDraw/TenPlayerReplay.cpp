@@ -72,7 +72,7 @@ int __stdcall HapiReceive_Detour(HAPINETStruct* hapi, void* outBuf, int* bufSize
 			{
 				taPtr->hapinet.fromDpid = LOCAL_HUMAN_PLAYER->DirectPlayID;
 				LOCAL_HUMAN_PLAYER->My_PlayerType = Player_RemoteHuman;
-				for (int i = 0; i < 10; ++i)
+				for (int i = 0; i < TAPlayerCount(); ++i)
 					LOCAL_HUMAN_PLAYER->AllyFlagAry[i] = 1;
 			}
 		}

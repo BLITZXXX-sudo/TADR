@@ -17,7 +17,7 @@
 // disassembly before touching anything below.
 static_assert(offsetof(TAdynmemStruct, LocalHumanPlayer_PlayerID) == 0x2A42, "TAdynmemStruct::LocalHumanPlayer_PlayerID moved");
 static_assert(offsetof(TAdynmemStruct, WorkStatusMask)            == 0x2A44, "TAdynmemStruct::WorkStatusMask moved");
-static_assert(offsetof(TAdynmemStruct, Players)                   == 0x1B63, "TAdynmemStruct::Players moved");
+static_assert(offsetof(TAdynmemStruct, PlayersStock)              == 0x1B63, "TAdynmemStruct::Players moved");
 static_assert(offsetof(PlayerStruct, PlayerRes)                   == 0x8C,   "PlayerStruct::PlayerRes moved");
 static_assert(offsetof(PlayerStruct, ShareMetal)                  == 0xE4,   "PlayerStruct::ShareMetal moved");
 static_assert(offsetof(PlayerStruct, ShareEnergy)                 == 0xE8,   "PlayerStruct::ShareEnergy moved");
@@ -67,8 +67,8 @@ namespace
 	// PlayerID without resetting anything, so a single pair of globals would
 	// leak one player's armed percentage onto whichever slot was last local.
 	// Indexing by slot keeps each seat's arm tied to that seat's own storage.
-	int g_metalPercent[10];
-	int g_energyPercent[10];
+	int g_metalPercent[TA_MAX_PLAYERS];
+	int g_energyPercent[TA_MAX_PLAYERS];
 
 	int g_lastGameTime = 0;
 	bool g_wasInGame = false;   // edge-detects the (lobby/loading) -> TAInGame transition
@@ -78,7 +78,7 @@ namespace
 
 	void ResetPercentModes()
 	{
-		for (int i = 0; i < 10; ++i)
+		for (int i = 0; i < TAPlayerCount(); ++i)
 		{
 			g_metalPercent[i] = -1;
 			g_energyPercent[i] = -1;
@@ -163,7 +163,7 @@ namespace
 			return nullptr;
 
 		unsigned char id = static_cast<unsigned char>(ta->LocalHumanPlayer_PlayerID);
-		if (id > 9)
+		if (id >= TAPlayerCount())
 			return nullptr;
 
 		PlayerStruct* me = &ta->Players[id];
@@ -263,7 +263,7 @@ namespace
 		g_wasInGame = inGame;
 
 		bool anyArmed = false;
-		for (int i = 0; i < 10; ++i)
+		for (int i = 0; i < TAPlayerCount(); ++i)
 			if (g_metalPercent[i] >= 0 || g_energyPercent[i] >= 0) { anyArmed = true; break; }
 		if (!anyArmed)
 			return;
@@ -281,7 +281,7 @@ namespace
 		// Walk every armed slot regardless of which one is currently local,
 		// so switching seats with `+control` can't bleed one player's arm
 		// into another's ShareMetal/ShareEnergy.
-		for (int i = 0; i < 10; ++i)
+		for (int i = 0; i < TAPlayerCount(); ++i)
 		{
 			if (g_metalPercent[i] < 0 && g_energyPercent[i] < 0)
 				continue;

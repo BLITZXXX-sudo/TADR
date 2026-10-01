@@ -185,13 +185,13 @@ void LagSwitchGuard::Tick()
 
 	int localSlot = taPtr->LocalHumanPlayer_PlayerID;
 	unsigned localDpid = 0;
-	if (localSlot >= 0 && localSlot < 10)
+	if (localSlot >= 0 && localSlot < TAPlayerCount())
 		localDpid = taPtr->Players[localSlot].DirectPlayID;
 
 	DWORD maxLastReceiveMs = 0;
 	int remoteHumanCount = 0;
 
-	for (int i = 0; i < 10; ++i)
+	for (int i = 0; i < TAPlayerCount(); ++i)
 	{
 		PlayerStruct& p = taPtr->Players[i];
 

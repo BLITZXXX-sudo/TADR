@@ -369,7 +369,7 @@ void UnitsMinimap::Init (
 
 	for (int i= 0; i<PLAYERNUM; ++i)
 	{
-		PlayerDotColor[i]= argPlayerDotColor[i];
+		PlayerDotColor[i]= argPlayerDotColor[i % 10];	// the caller's table has 10 entries
 	}
 		
 }
@@ -1137,7 +1137,7 @@ LPBYTE UnitsMinimap::NukePicture (int PlayerID, LPBYTE * PixelBits_pp,  POINT * 
 }
 LPBYTE UnitsMinimap::UnitPicture(UnitStruct * unitPtr,int PlayerID, LPBYTE * PixelBits_pp, POINT * Aspect)
 {
-	if ((PLAYERNUM<PlayerID)
+	if ((PLAYERNUM<=PlayerID)
 		||(PlayerID<0))
 	{
 		return NULL;

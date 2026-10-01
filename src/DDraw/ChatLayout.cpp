@@ -631,7 +631,7 @@ namespace
 				const int colX = toSys ? sysX : anchorX;
 				int&      curY = toSys ? sysCursorY : plrY;
 
-				const bool hasLogo = (slot >= 0 && slot < 10);   // 10 = system; >10 = don't blit
+				const bool hasLogo = (slot >= 0 && slot < TAPlayerCount());   // 10 = system; >10 = don't blit
 				int textX = colX;
 				if (hasLogo)
 					textX = (int)((double)colX + 1.5 * (double)scaledH);
@@ -703,7 +703,7 @@ namespace
 					const unsigned char* e = g_hist[g_sbPick[pick]];
 					const int sl = e[OFF_STR_LOGO];
 					const int hl = e[OFF_STR_FLAGS] & 0x20;
-					const bool hasLogo = (sl >= 0 && sl < 10);   // 10 = system; >10 = don't blit
+					const bool hasLogo = (sl >= 0 && sl < TAPlayerCount());   // 10 = system; >10 = don't blit
 					int textX = anchorX;
 					if (hasLogo)
 						textX = (int)((double)anchorX + 1.5 * (double)scaledH);
