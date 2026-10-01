@@ -15,6 +15,7 @@ uses
   TAMemManipulations,
   MemMappedDataStructure,
   TA_MemoryStructures,
+  TA_MemoryConstants,   // MAXPLAYERCOUNT - used to size UnitStatus
   PlayerDataU,
   log2, statslogging,//SavedDemoU,
   PacketBufferU;
@@ -39,7 +40,7 @@ type
   protected
     dp1 :IDirectPlay;
     dp3 :IDirectPlay3;
-    cs : TCriticalSection;
+    cs : SyncObjs.TCriticalSection;
     hMemMap      :Cardinal;
     crcattempts  : integer;
   protected
@@ -127,7 +128,7 @@ type
     function fnRemoveInvalidChar(const sString: string) : String;
   protected
     fPlayers : TPlayers;
-    fServerPlayer : TPlayerData;    
+    fServerPlayer : TPlayerData;
     procedure OnRemovePlayer(player : TPlayerData);
     function GetServerPlayer : TPlayerData;
 
@@ -152,7 +153,7 @@ type
     function facexpshandler( const s:string; from:TDPid;crccheck:boolean):string;
   protected
     sentpings    : array [0..101] of longword;
-    pingtimer    : integer;  
+    pingtimer    : integer;
     logpl        : Boolean;
     procedure PacketLostHandler( TimeStamp :longword; player :TPlayerData);
 
@@ -168,7 +169,7 @@ type
     killunits    : string;
 
     procedure GetRandomMap (fname :string);
-    
+
     function getRecorderStatusString : string;
   protected
     Commands : TCommands;
@@ -176,7 +177,7 @@ type
     PacketsToFilter : TArrayOfByte;
 
     {$I command_headers.inc}
-    
+
     function PacketHandler(input : String;var FromPlayerDPID, ToPlayerDPID  : TDPID) :string;
     //    Procedure PacketHandler( DPlayPacket: TDPlayPacket );
 //    function PacketHandler_BattleRoom( d : String; DPlayPacket: TDPlayPacket ) :string;
@@ -193,7 +194,7 @@ type
 
     procedure ProcessCRC(s:string);
     function GetGoodSource :integer;
-  public  
+  public
 
     procedure SendRecorderToRecorderMsg( MesageType : byte;
                                          const Data : string;
@@ -207,7 +208,7 @@ type
 
     procedure SendLocal( const msg :string; dest :TDPid; local, remote :boolean); overload;
     procedure SendLocal( const msg :string;  Source : TDPID; dest :TDPid; local, remote :boolean); overload;
-                         
+
     procedure SendChat( s : string; dest : TDPID = 0 );
     //
     procedure SendChatLocal(s:string);
@@ -227,7 +228,7 @@ type
     procedure Broadcast_ExtraUnitState(UnitID: Word; FieldType: Cardinal; NewValue: Integer; Dest: TDPID = 0);
 
     procedure ExceptMessage;
-    function OnException(E: Exception) : boolean;     
+    function OnException(E: Exception) : boolean;
   protected
     crash        : boolean;
     TADemoRecorderOff : boolean;
@@ -244,7 +245,7 @@ type
     initbase     : array [0..UNITSPACE div 5] of Tbuilding;
     basecount    : integer;
     curbuilding  : integer;
-//    buildstatus  : integer;  
+//    buildstatus  : integer;
     QuickBaseEnabled : Boolean;
     procedure dobase(till:TDPID);
     procedure initfastbase(namn:string);
@@ -413,12 +414,14 @@ var
   logsave   : TLog2 = nil;
   GlobalDPlay: TDPlay;
 
-  
+
 implementation
 
 uses
  mmsystem, registry,
  shfolder,
+ QueueDiag,            // QueueDiag_Poll - passive player-table sampling
+ SpeedDiag,            // SpeedDiag_Poll - game-speed / tick-rate divergence
  DPLobbyWrapper,
  uDebug, textdata,
  TextFileU, Logging,
@@ -436,11 +439,55 @@ uses
  InputHook,
  IniOptions,
  KeyboardHook,
- ModsList, GUIEnhancements, UnitActions;
+ ModsList, GUIEnhancements, UnitActions,
+ BuildInfo,
+ CloakOnly; // implementation-only: safe, since CloakOnly's interface uses idplay, not the reverse
+
+var
+  // TA sends a chat line once PER remote player (so 8 times to a machine with
+  // 1 human + 7 AIs), and TPLAYX sees every copy. Without this, a chat command
+  // ran once per copy - e.g. .autopause toggled 8 times and ended up "disabled".
+  LastChatText : string = '';
+  // 28 Sep: while a private command runs, SendChat shows its text locally only
+  PrivateReply : Boolean = False;
+  LastChatFrom : TDPID = 0;
+  LastChatTick : Cardinal = 0;
+  // same idea for the "*** X paused/unpaused the game" lines
+  LastPauseFrom  : TDPID = 0;
+  LastPauseState : Integer = -1;
+  LastPauseTick  : Cardinal = 0;
+const
+  CHAT_DEDUPE_MS = 1500;
+  // 28 Sep: personal commands - the typed line is not sent to other players and
+  // their replies are shown on this machine only.
+  PRIVATE_COMMANDS = ',help,about,record,recordstatus,time,fixall,fixfacexps,protectdt,' +
+                     'sharemappos,3dta,stoplog,onlyunits,unitsonly,createtxt,reportfilter,' +
+                     'disablefilter,removefilter,addfilter,loggingverbosity,lookupaddr,';
 
 {$WARNINGS ON}
 {$HINTS ON}
 {$STACKFRAMES ON}
+
+// 16P safety: write the REAL exception to its own small log file. Never raises.
+procedure TplayxExceptLog( const Where : string; E : Exception; Addr : Pointer );
+var
+  F : TextFile;
+  fn : string;
+begin
+  try
+    fn := ExtractFilePath(ParamStr(0)) + 'tplayx_exceptions.log';
+    AssignFile(F, fn);
+    if FileExists(fn) then Append(F) else Rewrite(F);
+    try
+      Writeln(F, FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now), '  ', Where, '  ',
+                 E.ClassName, ': ', E.Message, '  at $', IntToHex(PtrUInt(Addr), 8));
+    finally
+      CloseFile(F);
+    end;
+  except
+  end;
+end;
+
 
 {
 Procedure assert( condition : boolean; text : string = '');
@@ -454,12 +501,28 @@ end;
 }
 // -----------------------------------------------------------------------------
 
+function Rec2Rec_GetUnitName(pUnit: PUnitStruct): AnsiString;
+var Info: PUnitInfo;
+begin
+  Result := '?';
+  if (pUnit = nil) or (DWORD(pUnit) <= $10000) then Exit;
+  if pUnit^.nUnitInfoID = 0 then Exit;
+  Info := TAMem.UnitInfoId2Ptr(pUnit^.nUnitInfoID);
+  if (Info <> nil) and (DWORD(Info) > $10000) then
+    Result := AnsiString(Info^.szUnitName);
+end;
+
 const
   MaxTextMsgSize = 63;
 procedure TDPlay.SendChat( s : string; dest :TDPID = 0 );
 var
   s2 : string;
 begin
+if PrivateReply and (dest = 0) then
+  begin
+  SendChatLocal( s );      // private command reply - this screen only
+  Exit;
+  end;
 TLog.Add(1,'"'+s+'"');
 repeat
   if Length(s) > MaxTextMsgSize then
@@ -555,7 +618,7 @@ if local then
   TLog.Add(6,'adding ' + datatostr2(msg));
   end;
 end;
-  
+
 procedure TDPlay.SendAlliedChat();
 var
   data : string;
@@ -607,7 +670,7 @@ if IsRecording then
     s[4] := char(b shr 8);
 
     if Source = TDPID(-1) then
-      s[5] := char(1)                        //spelare som sände
+      s[5] := char(1)                        //spelare som s nde
     else
       s[5] := char(Players.ConvertId(Source,ZI_Everyone,false));
     s:=s+c;                                 //paketet
@@ -747,13 +810,29 @@ procedure TDPlay.Broadcast_ExtraUnitState(UnitID: Word;
 var
   customPacket : AnsiString;
 begin
+  // AUDIT 28 Sep: cloak state (FieldType 2) is never sent - every machine
+  // computes it locally (CloakOnly.CLOAK_NET_SEND = False). Enforced here as
+  // well, so no caller can put a cloak packet on the wire.
+  if (FieldType = 2) and not CloakOnly.CLOAK_NET_SEND then Exit;
   SetLength( customPacket, SizeOf(TRec2Rec_ExtraUnitState_Message));
   Move( UnitID, customPacket[1], SizeOf(Word));
   Move( FieldType, customPacket[3], SizeOf(Cardinal));
   Move( NewValue, customPacket[7], SizeOf(Integer));
-  SendRecorderToRecorderMsg( TANM_Rec2Rec_ExtraUnitState, customPacket, False, Dest );
+  {$IFDEF TPLAYX_DEBUG}
+  CloakOnly.WriteLog(Format('EXTRAUNITSTATE_SEND  UnitID=%-4d  FieldType=%d  NewValue=%d  Dest=%d  NetEnabled=%d',
+    [UnitID, FieldType, NewValue, Dest, Ord(TAData.NetworkLayerEnabled)]));
+  {$ENDIF}
+  // CloakOnly thread: take the TDPlay lock - Send/Receive and the local
+  // message queue are not thread safe. The on-screen debug line is gone
+  // (it was queued from this thread and flooded the chat).
+  cs.Acquire;
+  try
+    SendRecorderToRecorderMsg( TANM_Rec2Rec_ExtraUnitState, customPacket, False, Dest );
+  finally
+    cs.Release;
+  end;
 end;
-                                   
+
 // -----------------------------------------------------------------------------
 
 procedure TDPlay.OnMemoryCheckTick(Sender : TObject);
@@ -845,7 +924,7 @@ begin
       continue;
 
     case state of
-      0  :begin   //i början
+      0  :begin   //i b rjan
             if st[1] = '+' then
               state := 1;
           end;
@@ -1047,7 +1126,7 @@ var
   holdstring :string;
   a          :integer;
   player : TplayerData;
-begin                                 
+begin
 player := Players.Convert(till, ZI_InvalidPlayer, false);
 if player = nil then Exit;
 if (player.Side <> 0) or (player.Side <> 1) then
@@ -1153,8 +1232,15 @@ var
   params : TStringList;
   CommandHandler : TCommandHandler;
 begin
-Sender := Players.Convert(from, ZI_HostPlayer);
-if Sender.IsSelf then
+// ignore the extra copies of the same chat line (one copy per remote player)
+if (s = LastChatText) and (from = LastChatFrom) and
+   (Cardinal(timeGetTime - LastChatTick) < CHAT_DEDUPE_MS) then
+  Exit;
+LastChatText := s;
+LastChatFrom := from;
+LastChatTick := timeGetTime;
+Sender := Players.Convert(from, ZI_HostPlayer, false);
+if (Sender <> nil) and Sender.IsSelf then
   begin
   if assigned(chatview) and (chatview^.NewData = 0) then
     begin
@@ -1172,7 +1258,7 @@ if i>0 then
   if (s2 <> '') and (from <> 0) then
     begin
     if (s2[1]= '.') then
-    begin    
+    begin
     TLog.add( 2, 'Command:'+s2);
     i := pos(' ',s2)-1;
     if I = -1 then
@@ -1187,6 +1273,16 @@ if i>0 then
       end;
     handled := False;
     CommandHandler := Commands.LookUpCommand( Command );
+    // 28 Sep: my own private command -> do not send the typed line to anyone.
+    // datachanged makes the packet handler replace this chat sub-packet with
+    // the usual no-op, the same way other swallowed packets are removed.
+    if (CommandHandler <> nil) and (Sender <> nil) and Sender.IsSelf and
+       (Pos(','+Command+',', PRIVATE_COMMANDS) > 0) then
+      begin
+      datachanged := True;
+      PrivateReply := True;
+      end;
+    try
     if CommandHandler <> nil then
       begin
       if CommandHandler.IsSelfOnly and not Sender.IsSelf then
@@ -1235,12 +1331,15 @@ if i>0 then
               SendChat('Error in command handler:'+CommandHandler.Name);
               if OnException(e) then raise;
               end;
-          end;                   
+          end;
         finally
           params.Free;
         end;
         end;
       end;
+    finally
+      PrivateReply := False;
+    end;
     if not handled then
       begin
       if Sender.IsSelf then
@@ -1321,7 +1420,7 @@ if timestamp < PacketMonitoring^.LastPacket then
     inc(PacketMonitoring^.PacketLostHistory[10]);
   PacketMonitoring^.LastPacket := timestamp;
   end;
-end; 
+end;
 
 // -----------------------------------------------------------------------------
 
@@ -1330,6 +1429,10 @@ var
   s,path    :string;
   crc     :string;
   a       :integer;
+  // dedicated locals for the MAX_PATH clamp - do NOT reuse s/crc/a there,
+  // they are live for the rest of this procedure.
+  ClampDir, ClampName, ClampExt : string;
+  ClampRoom : integer;
 begin
 if NoRecording then
   exit;
@@ -1356,6 +1459,34 @@ begin
         filename := IncludeTrailingPathDelimiter(demodir) + filename;
   end else
     filename := IncludeTrailingPathDelimiter(demodir) + filename;
+end;
+
+// GUARD: the demo filename is built by concatenating EVERY player name, so
+// at 16 players it reached 296 chars - past Windows MAX_PATH (260). The OS
+// reports an over-length path as error 3 "path not found", which looks like
+// a missing folder but is not. Clamp the NAME part, keeping the directory
+// and the .tad extension intact.
+// FIXED 2026-09-11: the first version of this clamp reused 's' and 'crc',
+// which are live variables belonging to the rest of createlogfile. Clobbering
+// them corrupted state and the crash followed immediately after the
+// "truncated" log line. Use dedicated locals and never touch s/crc/a here.
+if Length(filename) > 250 then
+begin
+  ClampDir  := ExtractFilePath(filename);
+  ClampExt  := ExtractFileExt(filename);
+  ClampName := ExtractFileName(filename);
+  // strip the extension off the name part
+  if (ClampExt <> '') and (Length(ClampName) > Length(ClampExt)) then
+    ClampName := Copy(ClampName, 1, Length(ClampName) - Length(ClampExt));
+  // 250 keeps headroom under MAX_PATH(260) for the ".egs" stats file that is
+  // derived from this same name via ChangeFileExt later.
+  ClampRoom := 250 - Length(ClampDir) - Length(ClampExt);
+  if ClampRoom < 8 then
+    ClampRoom := 8;                       // never produce an empty name
+  if Length(ClampName) > ClampRoom then
+    ClampName := Copy(ClampName, 1, ClampRoom);
+  filename := ClampDir + ClampName + ClampExt;
+  TLog.add(2, 'demo filename truncated to fit MAX_PATH: ' + filename);
 end;
 
 path := ExtractFilePath(filename);
@@ -1411,6 +1542,13 @@ end;
   logsave.add(s);                       //write header
 
   s:=#0#0#0#0#0#0;                           //size of extra header
+  // s was just assigned a constant literal, so it still points at the
+  // compiler's read-only copy with a refcount of -1. setLongword writes
+  // through a raw @s[3] pointer, which bypasses the copy-on-write that a
+  // normal s[i] := assignment would trigger - so it wrote straight into the
+  // .rdata page holding the literal (observed faulting inside TDPlay's VMT)
+  // and access-violated. UniqueString forces a private, writable copy first.
+  UniqueString( s );
   //mod id 0 = backward compat.
   if IniSettings.modid > 0 then
     setLongword (@s[3], 5 + Players.Count)        //number of extra sectors
@@ -1510,6 +1648,9 @@ end;
   //Addition to save crc - #9 will make unitsync ignoring it
 
   crc := #$1a + #$9 + '    ' + #$ff#$ff#$ff#$ff + #$01#$00#$00#$00;
+  // same read-only literal hazard as the extra header above: make the string
+  // unique before writing through a raw pointer into it.
+  UniqueString( crc );
   setLongword (@crc[3], logsave.crc);
   s := s + crc;
 
@@ -1626,7 +1767,7 @@ if (Players.Convert(from, ZI_HostPlayer ,false) <> nil) and (Players.Convert(til
 
       if (not notai) and (s[12] = #$00) then
         ai := '';
-      if (not notai) and (s[12] = #$01) and (AutoRecording) and 
+      if (not notai) and (s[12] = #$01) and (AutoRecording) and
          (Players[1].ClickedIn) then
         SendChat( 'Warning: A custom AI (' + ai + ') is enabled');
       end;
@@ -1635,6 +1776,30 @@ if (Players.Convert(from, ZI_HostPlayer ,false) <> nil) and (Players.Convert(til
 end; {handleunitdata}
 
 // -----------------------------------------------------------------------------
+
+// 16P: .fixfacexps must also protect units of AIs running on THIS machine.
+// Sender.IsSelf is only the local human, so AI units (and every building an
+// AI makes) were never protected - their deaths were not recorded and late
+// damage from other machines still hit the new unit that reused the number.
+// A player is local when TA's player table has him as type 1 (human) or 2 (AI).
+function IsLocalTAPlayer(dpid : TDPid) : boolean;
+var
+  ta, p : Cardinal;
+  i     : Integer;
+begin
+  result := false;
+  ta := PCardinal($00511DE8)^;
+  if ta = 0 then Exit;
+  for i := 0 to 15 do
+  begin
+    p := ta + $3A000 + Cardinal(i) * $14B;
+    if (PCardinal(p)^ <> 0) and (PCardinal(p + 4)^ = Cardinal(dpid)) then
+    begin
+      result := PByte(p + $73)^ in [1, 2];
+      Exit;
+    end;
+  end;
+end;
 
 function TDPlay.facexpshandler( const s:string; from:TDPid;crccheck:boolean):string;
 var
@@ -1645,20 +1810,24 @@ var
 begin
 Result := s;
 TimeStamp := timeGetTime;
-sender := Players.Convert(from,ZI_HostPlayer);
-if (s[1]=#$0c) and Sender.IsSelf then
+sender := Players.Convert(from,ZI_HostPlayer,false);
+if Sender = nil then
+  Exit;
+if (s[1]=#$0c) and IsLocalTAPlayer(from) then
   begin
   wp := @s[2];
   w := wp^;
-  Assert( (Integer(w) >= Low(UnitStatus)) and ( w <= High(UnitStatus) ) );  
-  UnitStatus[w].lastdead := TimeStamp;
+  // was Assert-only, compiled out in release
+  if w <= High(UnitStatus) then
+    UnitStatus[w].lastdead := TimeStamp;
   end
-else if (s[1]=#$0b) and (not Sender.IsSelf) then
+else if (s[1]=#$0b) and (not IsLocalTAPlayer(from)) then
   begin
   wp := @s[2];
   w := wp^;
-  Assert( (Integer(w) >= Low(UnitStatus)) and ( w <= High(UnitStatus) ) );  
-  if (UnitStatus[w].lastdead>TimeStamp-3000) and
+  // was Assert-only, compiled out in release
+  if (w <= High(UnitStatus)) and
+     (UnitStatus[w].lastdead>TimeStamp-3000) and
      (UnitStatus[w].lastdead<TimeStamp+12*60*60*1000)then
     begin
     datachanged := true;
@@ -1676,11 +1845,11 @@ else if TPlayerData(item1).Id > TPlayerData(item2).Id then
   Result := 1
 else
   Result := 0;
-end; 
+end;
 
 
 // -----------------------------------------------------------------------------
-    
+
 Procedure TDPlay.SetAutoPauseAtStart( value : Boolean);
 begin
 fBattleRoomStateUpdated := true;
@@ -1702,6 +1871,7 @@ fBattleRoomState.F1Disable := value;
 if assigned(chatview) then
   chatview^.F1Disable := value;
 end;
+
 
 Procedure TDPlay.SetSpeedLock( value  : Boolean);
 begin
@@ -1795,9 +1965,19 @@ begin
       end;
     end;
   end;
+  // tell the other recorders which TPLAYX build we run (older ones ignore it)
+  SendRecorderToRecorderMsg( TANM_Rec2Rec_BuildId, TA16P_BUILD_ID, False );
 end;
 
 // -----------------------------------------------------------------------------
+
+var
+
+
+  RecvForLocalAI : Boolean = False;   // current received message is a copy for a local AI
+  // build id seen from each player (DPID=build), for the mismatch warning
+  SeenBuilds : TStringList = nil;
+  tmpBuild   : AnsiString = '';
 
 function TDPlay.packetHandler(input : String; var FromPlayerDPID, ToPlayerDPID : TDPID):string;
 var
@@ -1813,6 +1993,10 @@ var
 
   Rec2Rec : PRecorderToRecorderMessage;
   Rec2Rec_Data : Pointer;
+
+  RecvUnitId   : Word;
+  RecvNewValue : Integer;
+  RecvUnitPtr  : PUnitStruct;
 
   amaxunits : word;
   i,a,b             : integer;
@@ -1880,8 +2064,32 @@ var
 begin
   Result := input;
   TimeStamp := timeGetTime;
+  // Passive player-table sampling (no code patches). Self-throttling to
+  // ~4x/sec inside QueueDiag - logs only slot ADD/REMOVE/CHANGE, so this
+  // shows whether remote players are never registered or registered and
+  // then dropped. Set State_QueueDiag := False in QueueDiag.pas to disable.
+  QueueDiag_Poll;
+  // Game-speed / tick-rate divergence tracking. Frida measured the host at
+  // 21.65 ticks/s (speed 6) against the client at 13.74 ticks/s (speed 0) in
+  // the same game - 0 is an illegal speed that ChangeGameSpeed cannot
+  // produce, so an unclamped writer set it. Logs to speeddiag.log; compare
+  // Speed= and Tick/s between the two machines. Self-throttling.
+  {$IFDEF TPLAYX_DEBUG}
+  SpeedDiag_Poll;       // AUDIT 28 Sep: diagnostic only - was on the hot receive path
+  {$ENDIF}
   FromPlayer := Players.Convert( FromPlayerDPID , ZI_HostPlayer, false );
   ToPlayer := Players.Convert( ToPlayerDPID, ZI_Everyone, false );
+  // Convert() returns nil for a DPID that is not in the roster. This routine
+  // checks FromPlayer <> nil in about six places and then dereferences it
+  // bare in forty more, so a packet from an unknown/late DPID faulted on
+  // "push [eax+$0C]" (the IP field) inside packethandler. Substitute the
+  // inert placeholder so every one of those reads stays valid. The surviving
+  // "<> nil" tests below simply pass now, which is correct - the packet is
+  // still processed, just attributed to nobody instead of crashing.
+  if FromPlayer = nil then
+    FromPlayer := Players.UnknownPlayer;
+  if ToPlayer = nil then
+    ToPlayer := Players.UnknownPlayer;
   //  AdjustSpeeds (false);
 
   if Assigned(chatview) then
@@ -2033,7 +2241,7 @@ begin
         TANM_UnitTypesSync :
           begin
             handleunitdata(s, FromPlayerDPID, ToPlayerDPID);
-            //Hantering av sy-enheten
+//Hantering av sy-enheten
             currnr := @s[7];
             if currnr^ = SY_UNIT then
             begin
@@ -2059,7 +2267,8 @@ begin
           end;
         TANM_HostMigration :
           begin
-            if FromPlayer <> nil then
+            // never migrate the host onto the <unknown> placeholder
+            if (FromPlayer <> nil) and (FromPlayer <> Players.UnknownPlayer) then
               ServerPlayer := FromPlayer;
           end;
         TANM_PlayerInfo :
@@ -2112,13 +2321,28 @@ begin
                           end;
                         end;
                     end;
-                    if 10*maxunits+1 > Length(UnitStatus) then
+                    // UnitStatus is indexed by GLOBAL unit id, not by a
+                    // per-player id: StartInfo.ID is w - w mod maxunits, so
+                    // player n's units land at n*maxunits .. (n+1)*maxunits.
+                    // With 16 players the top index needed is 16*maxunits,
+                    // but Cavedog sized this 10*maxunits+1 - so players 11-16
+                    // wrote off the end of the heap block. That corruption is
+                    // silent until the allocator walks its free list, which is
+                    // why the crash surfaced inside SysFreeMem/fpc_finalize
+                    // (ErrorLog "Illegal write, data address 0x000000B6")
+                    // rather than here.
+                    //
+                    // Sizing is by MAXPLAYERS, not a hardcoded 16, and the
+                    // guard below only ever grows the array. The earlier
+                    // attempt at this failed for a different reason: it left
+                    // the init loop running to maxunits only, so the new tail
+                    // stayed uninitialised - fixed here by initialising the
+                    // whole newly added range.
+                    if MAXPLAYERCOUNT*maxunits+1 > Length(UnitStatus) then
                     begin
-                      a := high(UnitStatus);
-                      if a = -1 then
-                        a := 0;
-                      SetLength( UnitStatus, 10*maxunits+1 );
-                      for i := a to maxunits do
+                      a := Length(UnitStatus);   // first NEW index
+                      SetLength( UnitStatus, MAXPLAYERCOUNT*maxunits+1 );
+                      for i := a to High(UnitStatus) do
                       begin
                         UnitStatus[i].lastdead := 0;
                         UnitStatus[i].health := 42;
@@ -2257,6 +2481,24 @@ begin
                   Players[uc].ModInfo.ModMajorVer := PRec2Rec_ModInfo_Message(Rec2Rec_Data)^.ModMajorVer;
                   Players[uc].ModInfo.ModMinorVer := PRec2Rec_ModInfo_Message(Rec2Rec_Data)^.ModMinorVer;
                 end;
+              TANM_Rec2Rec_BuildId :
+                if (FromPlayer <> nil) and (not FromPlayer.IsSelf) and (Rec2Rec^.MsgSize > 0) then
+                begin
+                  SetLength( tmpBuild, Rec2Rec^.MsgSize );
+                  Move( Rec2Rec_Data^, tmpBuild[1], Rec2Rec^.MsgSize );
+                  if SeenBuilds = nil then
+                    SeenBuilds := TStringList.Create;
+                  if SeenBuilds.Values[IntToStr(FromPlayer.Id)] <> tmpBuild then
+                  begin
+                    SeenBuilds.Values[IntToStr(FromPlayer.Id)] := tmpBuild;
+                    if tmpBuild <> TA16P_BUILD_ID then
+                    begin
+                      SendChatLocal( FromPlayer.Name + ' has a different TPLAYX build - update so you both match' );
+                      SendChatLocal( '  theirs: ' + tmpBuild );
+                      SendChatLocal( '  yours:  ' + TA16P_BUILD_ID );
+                    end;
+                  end;
+                end;
             end;
             tmp := #$2a'd';          //Remove packets, so nothing happens
             datachanged := True;
@@ -2273,8 +2515,10 @@ begin
               begin
                 Player1.CanTake := AllyMessage^.Allied <> 0;
                 Player1.IsAllied := AllyMessage^.Allied <> 0;
-                if (chatview <> nil) and ( (FromPlayer.PlayerIndex >= 1) and
-                   (FromPlayer.PlayerIndex <= 10) ) then
+                // 16P fix: guard the index actually used (Player1), not FromPlayer.
+                // chatview^.allies is [1..10]; Player1 can be 11..16 in big games.
+                if (chatview <> nil) and ( (Player1.PlayerIndex >= 1) and
+                   (Player1.PlayerIndex <= 10) ) then
                   chatview^.allies[Player1.PlayerIndex] := AllyMessage^.Allied;
               end;
             end;
@@ -2331,7 +2575,7 @@ begin
                 end;
               end;
               filename := RemoveInvalid (filename);
-              //Lägg till default sökväg
+              //L gg till default s kv g
               if demodir <> '' then
               begin
                 if IniSettings.modid > 0 then
@@ -2409,6 +2653,11 @@ begin
     repeat
       s := TPacket.Split2(tmp, False, TPlayers.Name(FromPlayer), TPlayers.Name(ToPlayer));
       PacketType := Byte(s[1]);
+      // $15 = "this player finished loading". TA sends it ONCE per player,
+      // unguaranteed; if it is lost the other machine waits at the loading
+      // screen (or rejects the players). Send it guaranteed.
+      if PacketType = $15 then
+        RequireGuarantiedMsgDelivery := True;
 {      if s[1]=#$2a then
         if s[2]<>#100 then begin
           s[2] :=char(100-byte(s[2]));
@@ -2484,10 +2733,18 @@ begin
     repeat
       tmp := TPacket.Split2(s, False, TPlayers.Name(FromPlayer), TPlayers.Name(ToPlayer));
       PacketType := Byte(tmp[1]);
+      // Census: one inbound sub-packet from this sender. Counting here (after
+      // Split2, inside the in-game loop) counts what TA will actually act on,
+      // which is the number that has to be compared against the other
+      // machine's OUTBOUND count for the same dpid.
+      QueueDiag_CountIn( FromPlayerDPID, PacketType );
+      if PacketType = $15 then
+        RequireGuarantiedMsgDelivery := True;   // loading-done message, see InLoading
       case PacketType of
         TANM_HostMigration :
           begin
-            if FromPlayer <> nil then
+            // never migrate the host onto the <unknown> placeholder
+            if (FromPlayer <> nil) and (FromPlayer <> Players.UnknownPlayer) then
               ServerPlayer := FromPlayer;
           end;
         TANM_ChatMessage :
@@ -2507,7 +2764,7 @@ begin
                 begin
                   if Players[w].EnemyChat and (ToPlayerDPID <> Players[w].ID) then
                   begin
-                     //först från och sen till
+                     //f rst fr n och sen till
                     s2 := #$F9 + '####' + '>>>>' + Copy (tmp, 2, 100);
                     Setlongword (@s2[2], FromPlayerDPID);
                     Setlongword (@s2[6], ToPlayerDPID);
@@ -2537,17 +2794,26 @@ begin
             w:=pw^;
             if statslog <> nil then
               statslog.NewUnit_StatEvent(FromPlayer.PlayerIndex,w,w2,TAData.GameTime);
-            // kefft sätt att sätta StartInfo.ID.. damnusj
+            // kefft s tt att s tta StartInfo.ID.. damnusj
 
-            UnitStatus[w - 1].DoneStatus := 255;
-            if not UnitStatus[w-1].Unitalive then
+            // w is a word: w-1 with w=0 wraps to 65535. Guarded, was Assert-only.
+            if (w >= 1) and (w - 1 <= High(UnitStatus)) then
             begin
-              UnitStatus[w-1].Unitalive := True;
-              UnitCountChange(FromPlayer, 1);
+              UnitStatus[w - 1].DoneStatus := 255;
+              if not UnitStatus[w-1].Unitalive then
+              begin
+                UnitStatus[w-1].Unitalive := True;
+                UnitCountChange(FromPlayer, 1);
+              end;
             end;
 
             // SendChat (Players.Name[FromPlayerID] + ' unit ' + inttostr (w - (StartInfo.ID [FromPlayerID] + 1)) + ' is started');
-            FromPlayer.StartInfo.ID :=w-w mod maxunits;
+            // maxunits can still be 0 here (e.g. on a client whose max-units
+            // value has not arrived yet). "w mod 0" raised EDivByZero, which
+            // aborted the WHOLE incoming packet, so other messages in it were
+            // lost (the missing 0x15 ready messages at load time).
+            if maxunits > 0 then
+              FromPlayer.StartInfo.ID :=w-w mod maxunits;
             if w-FromPlayer.StartInfo.ID=2 then
             begin
               // TLog.add(3,'getting start coordinates');
@@ -2634,8 +2900,15 @@ begin
             end;
             SimulationSpeedChange := PSimulationSpeedChangeMessage(@tmp[1]);
             if (SimulationSpeedChange^.Marker = TANM_SimulationSpeedChange ) and
-               (SimulationSpeedChange^.SimSpeedChangeType = PauseChange) then
+               (SimulationSpeedChange^.SimSpeedChangeType = PauseChange) and
+               // show each pause/unpause once, not once per copy (one per remote player)
+               not ((FromPlayerDPID = LastPauseFrom) and
+                    (SimulationSpeedChange^.PauseState = LastPauseState) and
+                    (Cardinal(timeGetTime - LastPauseTick) < CHAT_DEDUPE_MS)) then
             begin
+              LastPauseFrom  := FromPlayerDPID;
+              LastPauseState := SimulationSpeedChange^.PauseState;
+              LastPauseTick  := timeGetTime;
               if (SimulationSpeedChange^.PauseState = 0) then
               begin
                 if NotViewingRecording then
@@ -2652,7 +2925,16 @@ begin
             currnr := @tmp[4];
             FromPlayer.LastTimeStamp := currnr^;
 
-            if FromPlayer.StartInfo.ID <> High(longword) then
+            // The only bounds check on this index used to be an Assert on w
+            // further up, which is compiled out in release - "a" itself was
+            // never checked, so a stale or out-of-range unit id wrote straight
+            // past the end of UnitStatus and corrupted the heap. Belt and
+            // braces now that the array is sized for MAXPLAYERCOUNT.
+            if (maxunits > 0) and
+               (FromPlayer.StartInfo.ID <> High(longword)) and
+               (Length(UnitStatus) > 0) and
+               (Int64(currnr^ mod maxunits) + Int64(FromPlayer.StartInfo.ID)
+                  <= High(UnitStatus)) then
             begin
               a := (currnr^ mod maxunits) + FromPlayer.StartInfo.ID;
               if tmp[2] = #$0b then
@@ -2706,8 +2988,10 @@ begin
               begin
                 Player1.CanTake := AllyMessage^.Allied <> 0;
                 Player1.IsAllied := AllyMessage^.Allied <> 0;
-                if (chatview <> nil) and ( (FromPlayer.PlayerIndex >= 1) and
-                   (FromPlayer.PlayerIndex <= 10) ) then
+                // 16P fix: guard the index actually used (Player1), not FromPlayer.
+                // chatview^.allies is [1..10]; Player1 can be 11..16 in big games.
+                if (chatview <> nil) and ( (Player1.PlayerIndex >= 1) and
+                   (Player1.PlayerIndex <= 10) ) then
                   chatview^.allies[Player1.PlayerIndex] := AllyMessage^.Allied;
               end;
             end;
@@ -2718,7 +3002,9 @@ begin
             w:=pw^;
             if statslog <> nil then
               statslog.UnitFinished_StatEvent(FromPlayer.PlayerIndex,w,TAData.GameTime);
-            UnitStatus[w - 1].DoneStatus := 0;
+            // w is a word: w-1 with w=0 wraps to 65535. Guarded, was Assert-only.
+            if (w >= 1) and (w - 1 <= High(UnitStatus)) then
+              UnitStatus[w - 1].DoneStatus := 0;
             // SendChat (Players.Name[FromPlayerID] + ' unit ' + inttostr (w - (StartInfo.ID [FromPlayerID] + 1)) + ' is done');
           end;
         TANM_UnitKilled :
@@ -2731,11 +3017,15 @@ begin
               w2:=pw^;
               statslog.Kill_StatEvent(w,w2,TAData.GameTime);
             end;
-            UnitStatus[w - 1].DoneStatus := 1000;
-            if UnitStatus[w - 1].unitalive then
+            // w is a word: w-1 with w=0 wraps to 65535. Guarded, was Assert-only.
+            if (w >= 1) and (w - 1 <= High(UnitStatus)) then
             begin
-              UnitStatus[w - 1].unitalive := false;
-              UnitCountChange(FromPlayer,-1);
+              UnitStatus[w - 1].DoneStatus := 1000;
+              if UnitStatus[w - 1].unitalive then
+              begin
+                UnitStatus[w - 1].unitalive := false;
+                UnitCountChange(FromPlayer,-1);
+              end;
             end;
           end;
         TANM_UnitTakeDamage :
@@ -3008,11 +3298,26 @@ begin
                   if (not FromPlayer.IsSelf) then
                   begin
                     assert( Rec2Rec^.MsgSize = SizeOf(TRec2Rec_ExtraUnitState_Message) );
+                    RecvUnitId   := PRec2Rec_ExtraUnitState_Message(Rec2Rec_Data)^.UnitId;
+                    RecvNewValue := PRec2Rec_ExtraUnitState_Message(Rec2Rec_Data)^.NewValue;
+                    // AUDIT 28 Sep: UnitId comes off the network - bounds-check it
+                    // before indexing UnitsCustomFields (was unchecked).
+                    if RecvUnitId < Cardinal(Length(UnitsCustomFields)) then
                     case PRec2Rec_ExtraUnitState_Message(Rec2Rec_Data)^.FieldType of
                      1 :
                        begin
-                         UnitsCustomFields[PRec2Rec_ExtraUnitState_Message(Rec2Rec_Data)^.UnitId].ShieldedBy :=
-                           TAUnit.Id2Ptr(PRec2Rec_ExtraUnitState_Message(Rec2Rec_Data)^.NewValue);
+                         UnitsCustomFields[RecvUnitId].ShieldedBy := TAUnit.Id2Ptr(RecvNewValue);
+                       end;
+                     2 : // Cloak state - ignored: computed locally (CloakOnly.CLOAK_NET_RECV = False)
+                       begin
+                         RecvUnitPtr := TAUnit.Id2Ptr(RecvUnitId);
+                         if CloakOnly.CLOAK_NET_RECV and (RecvUnitPtr <> nil) then
+                           TAUnit.SetCloak(RecvUnitPtr, RecvNewValue);
+                         {$IFDEF TPLAYX_DEBUG}
+                         CloakOnly.WriteLog(Format('CLOAK_RECV(ignored=%d)  UnitID=%-4d  Unit=%-12s  FromP=%d(%s)  Value=%d',
+                           [Ord(not CloakOnly.CLOAK_NET_RECV), RecvUnitId, string(Rec2Rec_GetUnitName(RecvUnitPtr)),
+                            FromPlayer.PlayerIndex, FromPlayer.Name, RecvNewValue]));
+                         {$ENDIF}
                        end;
                     end;
                   end;
@@ -3054,6 +3359,15 @@ begin
             break;
           end;
       {$ENDIF}
+
+      // 16P: copy of a message addressed to a local AI - the copy for the local
+      // human has the same data. Keep only 0x28 (end-of-game stats, sent to one
+      // player at a time); everything else would be acted on twice or more.
+      if RecvForLocalAI and (Length(tmp) > 0) and (tmp[1] <> #$28) then
+      begin
+        tmp := #$2a'd';
+        datachanged := true;
+      end;
 
       //Hantera exploderande byggen
       if fixfacexps then
@@ -3128,7 +3442,7 @@ begin
           b:=b+1000*60*60*24;                   //kl24 fix
         s[3] := char(b and $ff);                //tid sedan senaste
         s[4] := char(b shr 8);
-        s[5] := char(FromPlayer.playerindex);             //spelare som sände
+        s[5] := char(FromPlayer.playerindex);             //spelare som s nde
         s:= s+c;                                 //paketet
         s[1] := char(length(s) and $ff);          //fyll i storlek
         s[2] := char(length(s) shr 8);
@@ -3190,6 +3504,11 @@ try
 {$IFDEF ThreadLogging}  ThreadLogger.LogThreadID;{$ENDIF}
   lpName := lpData;
   player := Players.Add( lpName^.lpszLongName, idPlayer );
+  // Every player enters the roster HERE and nowhere else - and only when TA
+  // asks DirectPlay for that player's name. The client ended a 16-player game
+  // with remote=0 while the host had all 8, so log each registration to show
+  // whether the client is simply never asked about the host's players.
+  QueueDiag_LogRegister( idPlayer, lpName^.lpszLongName, Players.Count );
   if Players.Count = 1 then
     begin
     // todo: depending on weapon id patch
@@ -3271,7 +3590,7 @@ try
   end;
 finally
   cs.Release;
-end;    
+end;
 except
   on e : Exception do
      begin
@@ -3301,7 +3620,7 @@ if TADemoRecorderOff then
   exit;
   end;
 cs.Acquire;
-try   
+try
 {$IFDEF FindRetAddr}
 if SendReturnAddr = 0 then
   asm
@@ -3319,6 +3638,11 @@ try
   RequireGuarantiedMsgDelivery := false;
   s := PtrToStr (@lpdata, lpdwDataSize);
   till := lpidto;
+  // Census: count what we are about to SEND, before packethandler rewrites
+  // the stream. s[1] is the first sub-packet's type byte; that is enough to
+  // compare against the other machine's inbound $2C count for this dpid.
+  if Length(s) > 0 then
+    QueueDiag_CountOut( idFrom, Byte(s[1]) );
   s := packethandler (s, idfrom, till);
   if RequireGuarantiedMsgDelivery then
      dwFlags := dwflags or DPSEND_GUARANTEED;
@@ -3342,7 +3666,8 @@ try
 except
   on E: Exception do
     begin
-    LogException(E);
+    TplayxExceptLog('TDPlay.Send', E, ExceptAddr);
+    try LogException(E); except end;
     try
       errorAddress := Longword(ExceptAddr);
       SendChat('Exception caught in TDPlay.Send; $'+IntToHex(errorAddress,8));
@@ -3380,6 +3705,29 @@ finally
 end;
 end;
 
+var
+  AIDupDropped : Cardinal = 0;
+
+// True when dpid is an AI running on THIS machine (TA player type 2).
+function IsLocalAIDpid(dpid : TDPID) : boolean;
+var
+  ta, p : Cardinal;
+  i     : Integer;
+begin
+  result := false;
+  ta := PCardinal($00511DE8)^;
+  if ta = 0 then Exit;
+  for i := 0 to 15 do
+  begin
+    p := ta + $3A000 + Cardinal(i) * $14B;
+    if (PCardinal(p)^ <> 0) and (PCardinal(p + 4)^ = Cardinal(dpid)) then
+    begin
+      result := PByte(p + $73)^ = 2;
+      Exit;
+    end;
+  end;
+end;
+
 function TDPlay.Receive(var lpidFrom: TDPID; var lpidTo: TDPID; dwFlags: longword;
         lpData: Pointer; var lpdwDataSize: longword) : HResult;
 var
@@ -3393,6 +3741,8 @@ var
    bogustill :TDPID;
    errorAddress,errorAddress2 : Longword;
    i : Integer;
+   rcvFrom, rcvTo : TDPID;
+   rcvSize : longword;
 begin
 if TADemoRecorderOff then
   begin
@@ -3400,7 +3750,7 @@ if TADemoRecorderOff then
   exit;
   end;
 cs.Acquire;
-try   
+try
 {$IFDEF FindRetAddr}
 if RecieveReturnAddr = 0 then
   asm
@@ -3424,23 +3774,29 @@ try
       begin
       for i := 1 to Players.Count do
       if (TakeStatus = SelfTaking) and (Players[i].TakeUnit <> 0) then
-        begin 
+        begin
         TLog.add(2,'inserting give data');
         lpidFrom := Players[i].ID;
 
         holdstring := '123456';
+        // literal assignment leaves holdstring pointing at read-only memory;
+        // wp^/ip^ write through raw pointers and bypass copy-on-write.
+        UniqueString( holdstring );
         wp := @holdstring[1];
         w := Players[i].TakeUnit + Players[i].StartInfo.ID;
         wp^ := w;
         ip := @holdstring[3];
         ip^ := Players[1].Id; //changed from 7E
         holdstring:=#$14+holdstring+#$00#$00#$00#$00+'F'+#$01#$00#$00#$00#$00+'d'+#$7F#$00#$00#$00#$00#$00;
-        Assert( (integer(w)-1 >= Low(UnitStatus)) and ( (w-1) <= High(UnitStatus) ) );
-        setword(@holdstring[12], UnitStatus[w - 1].health);
+        // was Assert-only, compiled out in release
+        if (w >= 1) and (w - 1 <= High(UnitStatus)) then
+        begin
+          setword(@holdstring[12], UnitStatus[w - 1].health);
 
-        //Only take on units that are finished building
-        if UnitStatus[w - 1].DoneStatus = 0 then
-          SendLocal( holdstring, 0, true, false); //copy it to here and change below to maxunits-2 from maxunits-1
+          //Only take on units that are finished building
+          if UnitStatus[w - 1].DoneStatus = 0 then
+            SendLocal( holdstring, 0, true, false); //copy it to here and change below to maxunits-2 from maxunits-1
+        end;
 
         if Players[i].TakeUnit >= maxunits-Longword(2) then
           begin
@@ -3496,12 +3852,25 @@ try
       exit;
     end;
 
+    // 16P: every machine sends each message once PER PLAYER, so a machine
+    // running a human + 7 AIs received every message 8 times and TA acted on
+    // each copy: a new unit arriving 8x kills and re-creates itself (buildings
+    // exploding, unit counts credited 8x). In game, the copy addressed to a
+    // local AI is skipped - the copy for the local human carries the same data.
     Result := dp3.Receive (lpidFrom, lpidTo, dwFlags, lpData, lpdwDataSize);
+    RecvForLocalAI := (Result = DP_OK) and (lpidFrom <> DPID_SYSMSG) and
+                      (TAStatus = InGame) and IsLocalAIDpid(lpidTo);
+    if RecvForLocalAI then
+    begin
+      Inc(AIDupDropped);
+      if (AIDupDropped = 1) or (AIDupDropped mod 5000 = 0) then
+        TLog.add(0, '16P: neutralised duplicate messages addressed to local AIs: '+IntToStr(AIDupDropped));
+    end;
 
     if Result = DP_OK then
       begin
       if lpidfrom = DPID_SYSMSG then
-        begin // process messages from the system virtual player 
+        begin // process messages from the system virtual player
         if (longword(lpdata^) = DPSYS_HOST) then
           // we are now the host!
           ServerPlayer := Players[1]
@@ -3552,7 +3921,8 @@ try
 except
   on E: Exception do
     begin
-    LogException(E);
+    TplayxExceptLog('TDPlay.Receive', E, ExceptAddr);
+    try LogException(E); except end;
     try
       errorAddress := Longword(ExceptAddr);
       SendChat('Exception caught in TDPlay.Receive; $'+IntToHex(errorAddress,8));
@@ -3623,10 +3993,10 @@ if not result then
   // pause the game
   SendLocal( #$19#$00#$01, 0, true, true);
   // emit warning text
-  SendChat( 'The recorder has caused an illegal operation. It is possible');
+  SendChat( ' 1)  Type .crash and unpause. This will  SendChat( 'The recorder has caused an illegal operation. It is possible');
   SendChat( 'that it will continue to do so until you shut it down. If');
   SendChat( 'you want to help us fix this bug, do the following:');
-  SendChat( ' 1)  Type .crash and unpause. This will cause TA to quit.');
+ cause TA to quit.');
   SendChat( ' 2)  Send the file "errorlog.txt" from your TA dir to us.');
   SendChat( '     Please send the file immediately after TA exits.');
   SendChat( 'You can shutdown the recorder by typing .panic (hopefully)');
@@ -3743,7 +4113,7 @@ try
   TLog.add(2, 'TDPlay.Open, dwFlags = $'+IntToHex( dwFlags, 8 ) );
   // make sure we create/join games were DPlay implements keepalives
   // and if the host dies make sure the session is migrated!!!
-  lpsd.dwFlags := lpsd.dwFlags or DPSESSION_KEEPALIVE or DPSESSION_MIGRATEHOST;  
+  lpsd.dwFlags := lpsd.dwFlags or DPSESSION_KEEPALIVE or DPSESSION_MIGRATEHOST;
   Result := dp3.Open (lpsd, dwFlags);
   if Result = DP_OK then
     begin
@@ -3755,7 +4125,7 @@ try
 {$IFDEF ThreadLogging}  ThreadLogger.LogThreadID;{$ENDIF}
 finally
   cs.Release;
-end;   
+end;
 except
   on e : Exception do
     begin
@@ -3780,7 +4150,7 @@ try
   Result := dp3.Close;
 finally
   cs.Release;
-end;  
+end;
 except
   on e : Exception do
     begin
@@ -3847,7 +4217,7 @@ try
   // will be set as "backward compatibility" in Replayer
   if reg.ReadString('Options', 'TADir', '') = '' then
     reg.WriteString('Options', 'TADir', ParamStr(0));
-    
+
   if demodir <> '' then
   begin
     demodir := IncludeTrailingPathDelimiter(demodir);
@@ -3952,7 +4322,7 @@ try
     TLog.Add (1,'flushing stats');
     FreeAndNil( statslog );
     end;
-    
+
 if not IsInGame then Exit;
 IsInGame := False;
 TADemoRecorderOff := True;
@@ -4001,7 +4371,7 @@ try
     end;
   // flush the log file
   TLog.Flush;
-  // Indicate to TA hook that the recorder has shut down 
+  // Indicate to TA hook that the recorder has shut down
   if assigned(chatview) then
     chatview^.tastatus := 1000;
 {    UnmapViewOfFile(chatview);
@@ -4027,7 +4397,7 @@ end; {Exiting}
 constructor TDPlay.Create (realdp :IDirectPlay);
 begin
   inherited Create;
-  cs := TCriticalSection.create;
+  cs := SyncObjs.TCriticalSection.create;
 //  sysbufl:=GetSystemDirectory(@sysbuf[1],100);
 //  sysdir:=copy(sysbuf,1,sysbufl);
 {$IFDEF DplayRedirector}
@@ -4054,8 +4424,10 @@ end;
 
 destructor TDPlay.Destroy;
 begin
-GlobalDPlay.trCheckMemoryCheats.Free;
-GlobalDPlay.trCheckProhibitedProcesses.Free;
+// AUDIT 28 Sep: free OUR timers (was GlobalDPlay.xxx - wrong object if
+// GlobalDPlay is nil or another instance) and nil them.
+FreeAndNil( trCheckMemoryCheats );
+FreeAndNil( trCheckProhibitedProcesses );
 
 //GlobalDPlay.trTakeScreenshot.Free;
 GlobalDPlay:= nil;
@@ -4078,6 +4450,12 @@ FreeAndNil( AlliedMarkerQueue );
 FreeAndNil( MessageQueue );
 FreeAndNil( Log_ );
 CleanUpMapFile;
+// AUDIT 28 Sep: the chat shared-memory view + mapping handle opened in the
+// constructor (OpenMemMap) were never released - the old close code in the
+// game-end routine is commented out, correctly, because the map is reused
+// for the next game. Release both here, after everything that uses them.
+CloseMemMap( hMemMap, chatview );
+FreeAndNil( SeenBuilds );
 FreeAndNil( cs );
 inherited;
 end; {Destroy}

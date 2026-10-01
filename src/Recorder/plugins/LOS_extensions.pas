@@ -91,8 +91,14 @@ sub_4B7F30
 }
 
 Procedure ResetShareLosState;
+var
+  MainStructPtr: PTADynMemStruct;
 begin
-ViewPlayer := TAData.LocalPlayerID;
+  // Bypass TAData.LocalPlayerID (class property → class method dispatch crashes
+  // in FPC at this hook point). Read cControlPlayerID directly from raw pointer.
+  if PCardinal(TAdynmemStructPtr)^ = 0 then Exit;
+  MainStructPtr := PTADynMemStruct(PCardinal(TAdynmemStructPtr)^);
+  ViewPlayer := MainStructPtr.cControlPlayerID;
 end; {ResetShareLosState}
 
 Procedure OnInstallShareLOS;

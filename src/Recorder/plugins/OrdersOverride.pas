@@ -28,10 +28,157 @@ uses
   TA_MemoryLocations,
   TA_MemUnits,
   TA_MemPlayers,
-  TA_FunctionsU;
+  TA_FunctionsU,
+  GUIEnhancements;
 
 var
   OrdersOverridePlugin: TPluginData;
+
+// -----------------------------------------------------------------------------
+// Diagnostic (2026-07-22): ARMMEX stationary auto-resurrect investigation.
+// A stationary (cBMCode=0) unit given canresurrect=1 shows a valid Resurrect
+// cursor/order but the order never completes, whether issued manually or via
+// a COB-side ORDER_SELF_POS(37, ...) call. This wraps (not replaces) the
+// native RESURRECT order handler - found via the exact same
+// ScriptActionName2Index/ScriptActionIndex2Handler lookup already used below
+// for TELEPORT/REPAIRPATROL - so we can log what ucState/Result the real
+// handler is actually returning each tick for a stalled order, instead of
+// guessing blind from static disassembly. Once we see a live trace we can
+// write a real fix (either a targeted patch to the movement/range gate, or a
+// from-scratch replacement like RepairPatrol's, informed by real state
+// values instead of assumptions).
+// -----------------------------------------------------------------------------
+
+type
+  TOrderActionHandlerFunc = function(p_Unit: PUnitStruct;
+    p_Order: PUnitOrder; LastState: Integer): Integer; stdcall;
+
+var
+  OriginalResurrectHandler: TOrderActionHandlerFunc;
+  DiagResurrectCallCount: Integer = 0;
+
+// Linear scan of the live units array for a unit near a given world position,
+// used right after a stationary resurrect completes to locate the
+// freshly-created unit (the wreck/feature at that spot has just become a
+// live unit, spawned at 1 HP) so we can top up its health directly. Same
+// array walk already used by TeleportGroupOfUnits below (TAData.UnitsArray_p
+// .. TAData.EndOfUnitsArray_p, stepping by SizeOf(TUnitStruct)).
+function FindUnitNearPosition(p_Pos: PPosition; MaxDist: Integer;
+  p_Exclude: PUnitStruct): PUnitStruct;
+var
+  TestedUnit: PUnitStruct;
+begin
+  Result := nil;
+  TestedUnit := TAData.UnitsArray_p;
+  while ( Cardinal(TestedUnit) <= Cardinal(TAData.EndOfUnitsArray_p) ) do
+  begin
+    if TestedUnit <> p_Exclude then
+    begin
+      if TAMem.DistanceBetweenPosCompare(@TestedUnit.Position, p_Pos, MaxDist) then
+      begin
+        Result := TestedUnit;
+        Exit;
+      end;
+    end;
+    TestedUnit := Pointer(Cardinal(TestedUnit) + SizeOf(TUnitStruct));
+  end;
+end;
+
+function OrdersOverride_ResurrectDiag(p_Unit: PUnitStruct;
+  p_Order: PUnitOrder; LastState: Integer): Integer; stdcall;
+var
+  StateBefore: Byte;
+  Dist: Integer;
+  Bypassed: Boolean;
+  NewUnit: PUnitStruct;
+begin
+  StateBefore := p_Order.ucState;
+  Dist := TAMem.DistanceBetweenPos(@p_Unit.Position, @p_Order.Position);
+  Bypassed := False;
+
+  // Stationary-unit bypass (2026-07-23): native states 0-2 are gated on
+  // p_Unit.p_MovementClass <> nil (state 0) and otherwise assume the unit
+  // can physically walk into range (states 1-2). A BMcode=0 building never
+  // gets p_MovementClass populated at spawn regardless of FBI content, so it
+  // is rejected outright (Result=7) or - if forced mobile via FBI - can only
+  // "arrive" by actually moving, which either crashes (zero velocity, native
+  // divide-by-zero) or is impractically slow / visibly moves (near-zero
+  // velocity), both ruled out by testing. Since native states 3-6 (feature
+  // lookup, resurrect countdown, completion) have no movement dependency and
+  // are already proven working (see CORNECRO traces), we do our own simple
+  // straight-line range check here and, if in range, hand off directly into
+  // state 3 by setting ucState ourselves before calling the untouched
+  // original handler - bypassing 0-2 without needing to replicate their
+  // internal state-advancement logic. Real mobile units (p_MovementClass <>
+  // nil) and any order already past state 2 are always passed straight
+  // through unchanged.
+  if (p_Unit.p_MovementClass = nil) and (StateBefore <= 2) then
+  begin
+    if Dist <= p_Unit.p_UnitInfo.nBuildDistance then
+    begin
+      p_Order.ucState := 3;
+      Bypassed := True;
+    end
+    else
+    begin
+      Result := 7;
+      Inc(DiagResurrectCallCount);
+      if DiagResurrectCallCount <= 300 then
+        LogDiag(Format('RESURRECT diag #%d: UnitID=%d BMcode=%d StateBefore=%d ' +
+          'StateAfter=%d (out of range, BuildDistance=%d) LastState=%d ' +
+          'UnitPos=(%d,%d) TargetPos=(%d,%d) Dist=%d -> Result=7 [bypass-reject]',
+          [DiagResurrectCallCount, TAUnit.GetId(p_Unit), p_Unit.p_UnitInfo.cBMCode,
+           StateBefore, p_Order.ucState, p_Unit.p_UnitInfo.nBuildDistance, LastState,
+           p_Unit.Position.X, p_Unit.Position.Z, p_Order.Position.X,
+           p_Order.Position.Z, Dist]));
+      Exit;
+    end;
+  end;
+
+  Result := OriginalResurrectHandler(p_Unit, p_Order, LastState);
+  Inc(DiagResurrectCallCount);
+  // Cap logging so a permanently-stuck order can't flood tplayx_diag.log forever.
+  if DiagResurrectCallCount <= 300 then
+    LogDiag(Format('RESURRECT diag #%d: UnitID=%d BMcode=%d StateBefore=%d ' +
+      'StateAfter=%d LastState=%d UnitPos=(%d,%d) TargetPos=(%d,%d) Dist=%d ' +
+      'PauseState=%d RecallTime=%d Bypassed=%s -> Result=%d',
+      [DiagResurrectCallCount, TAUnit.GetId(p_Unit), p_Unit.p_UnitInfo.cBMCode,
+       StateBefore, p_Order.ucState, LastState, p_Unit.Position.X,
+       p_Unit.Position.Z, p_Order.Position.X, p_Order.Position.Z, Dist,
+       p_Order.lPauseState, p_Order.lRecallTime, BoolToStr(Bypassed, True), Result]));
+
+  // Auto-heal on resurrect completion (2026-07-23 round 3): resurrected
+  // units come back at 1 HP. Round 2 tried queueing a real REPAIR order
+  // (ScriptActionName2Index('REPAIR') -> ORDERS_CreateObject/ORDERS_PushOrder,
+  // same pattern OrdersOverride_RepairPatrol uses below) but the diag log
+  // showed it complete instantly every time (StateBefore=0 -> Result=5 on
+  // the very first tick, no progression) - disassembling the logged handler
+  // address ($00439EA0 in this build) confirmed why: it's a two-instruction
+  // stub, "mov eax,5 / ret 0xc", that unconditionally reports success and
+  // does nothing else. The real mobile-unit repair logic is dispatched a
+  // different way (ORDERS_ChaseUnitToBeRepaired -> ScriptAction_Type2Index
+  // with type 8, resolved per-unit-category), which is built around a
+  // builder that moves to its target - not usable as-is for a stationary
+  // BMcode=0 building. So instead of fighting the order system, once a
+  // STATIONARY unit's resurrect order fully completes (native state 6,
+  // Result=5) we find the unit that just appeared where the wreck was and
+  // top its health up directly - no order, no movement, no native handler
+  // involved, so nothing here can hit the same kind of stall or crash.
+  if (Result = 5) and (p_Unit.p_MovementClass = nil) then
+  begin
+    NewUnit := FindUnitNearPosition(@p_Order.Position, 64, p_Unit);
+    if NewUnit <> nil then
+    begin
+      NewUnit.nHealth := Word(NewUnit.p_UnitInfo.lMaxDamage);
+      LogDiag(Format('RESURRECT complete: healed new UnitID=%d to %d HP ' +
+        '(resurrected by UnitID=%d)', [TAUnit.GetId(NewUnit), NewUnit.nHealth,
+        TAUnit.GetId(p_Unit)]));
+    end else
+      LogDiag(Format('RESURRECT complete: could not find new unit near ' +
+        'TargetPos=(%d,%d) to heal (UnitID=%d)',
+        [p_Order.Position.X, p_Order.Position.Z, TAUnit.GetId(p_Unit)]));
+  end;
+end;
 
 // -----------------------------------------------------------------------------
 // Teleporters
@@ -287,7 +434,7 @@ begin
               UnitsCustomFields[UnitID].TeleportReloadMax := Distance;
             end;
 
-            if TAData.NetworkLayerEnabled then
+            if TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
               GlobalDPlay.Broadcast_NewUnitLocation(TAUnit.GetID(p_Unit), TargetPosition);
             UNITS_NewUnitPosition(p_Unit, TargetPosition.X, TargetPosition.Y, TargetPosition.Z, 1);
             if p_Order.lPar1 <> 0 then
@@ -610,6 +757,23 @@ begin
   NewAddress := Cardinal(@OrdersOverride_RepairPatrol);
   OrdersOverridePlugin.MakeReplacement( True,
                                         'Override repair patrol order to implement resurrect',
+                                        Cardinal(@p_ActionHandler.p_Order),
+                                        NewAddress,
+                                        SizeOf(Pointer) );
+
+  // Diagnostic wrap only (calls through to the original handler) - see the
+  // OrdersOverride_ResurrectDiag comment above for why this exists.
+  p_ActionHandler := TAMem.ScriptActionIndex2Handler(TAMem.ScriptActionName2Index('RESURRECT'));
+  OriginalResurrectHandler := TOrderActionHandlerFunc(p_ActionHandler.p_Order);
+  // Log the real native handler address once at install time (2026-07-22 round 2):
+  // live diag data shows every attempt gets rejected outright at state 0
+  // (Result=7, state never advances), regardless of distance to the wreck -
+  // this address lets us read the actual rejection logic statically instead
+  // of guessing why.
+  LogDiag(Format('RESURRECT native handler address: $%.8x', [Cardinal(p_ActionHandler.p_Order)]));
+  NewAddress := Cardinal(@OrdersOverride_ResurrectDiag);
+  OrdersOverridePlugin.MakeReplacement( True,
+                                        'Diagnostic wrap for stalled RESURRECT orders (stationary units)',
                                         Cardinal(@p_ActionHandler.p_Order),
                                         NewAddress,
                                         SizeOf(Pointer) );

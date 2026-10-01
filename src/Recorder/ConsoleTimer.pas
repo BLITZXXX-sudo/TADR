@@ -72,8 +72,20 @@ var
   sw: TStopWatch;
 begin
   sw:= TStopWatch.Create;
-  waitList[0] := FTimerEnabledFlag.Handle;
-  waitList[1] := FCancelFlag.Handle;
+
+
+
+
+  // Change these lines
+// To this:
+waitList[0] := THandle(FTimerEnabledFlag.Handle);
+waitList[1] := THandle(FCancelFlag.Handle);
+
+
+
+
+
+
   while not Terminated do
   begin
     if (WaitForMultipleObjects(2, @waitList[0], false, INFINITE) <>
@@ -88,7 +100,9 @@ begin
       waitInterval := FInterval - sw.ElapsedMilliSeconds;
       if (waitInterval < 0) then
          waitInterval := 0;
-      WaitForSingleObject(FCancelFlag.Handle,waitInterval);
+         // Change this line:
+
+WaitForSingleObject(THandle(FCancelFlag.Handle), waitInterval);
     end;
   end;
 end;

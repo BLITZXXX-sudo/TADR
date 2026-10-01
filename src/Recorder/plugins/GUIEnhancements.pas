@@ -13,9 +13,42 @@ function GetPlugin : TPluginData;
 
 // -----------------------------------------------------------------------------
 
+// Shared append-mode diagnostic logger (writes to tplayx_diag.log next to
+// TotalA.exe). Exposed here so other units (UnitActions, UnitSearchHandlers,
+// COB_extensions, ...) can log into the same file without each needing their
+// own file-handling boilerplate. LogDiag always writes; LogDiagOnce only
+// writes the first time IT SPECIFICALLY is called with a given AOnceFlag var
+// (pass a unit-local Boolean by reference) - callers must use their OWN flag
+// per distinct message, since a single shared flag would let whichever
+// message fires first silently suppress every other one forever.
+procedure LogDiag(const Msg: string);
+procedure LogDiagOnce(var AOnceFlag: Boolean; const Msg: string); overload;
+
 var
   ForceBottomStateRefresh: Integer;
   FormatSettings: TFormatSettings;
+  // Set true after the first out-of-range UnitsCustomFields/UnitInfoCustomFields
+  // index is logged anywhere in this unit, so a persistently out-of-range unit
+  // being redrawn every frame doesn't flood tplayx_diag.log.
+  DiagLoggedOnce: Boolean = False;
+  // Diagnostic (2026-07-22): ARMARAD shield-radius-circle investigation.
+  DiagLoggedRangeHookSeen: Boolean = False;
+  DiagLoggedRangeCircleDrawn: Boolean = False;
+  // Diagnostic (2026-07-22 round 3): per-nCategory one-shot, so we find out
+  // whether DrawUnitRangesShowrangesOff EVER runs for ARMARAD's own
+  // nCategory (18) specifically, instead of only ever capturing whichever
+  // unit happens to be selected first in a play session.
+  DiagSeenRangeCategory: array[0..500] of Boolean;
+  // Diagnostic (2026-07-22 round 4): DrawUnitState-driven radius circle,
+  // since DrawUnitRangesShowrangesOff is confirmed to never fire for
+  // NOWEAPON units (ARMARAD). See DrawUnitState for the actual draw call.
+  DiagLoggedRadiusCircleDrawn: Boolean = False;
+  // Diagnostic (2026-07-22 round 8): dump the raw palette bytes the game's
+  // OWN code uses for its known-good/known-bad health colors, so we can
+  // pick a real, confirmed "green" (or whatever) byte for the shield circle
+  // instead of guessing blind at TA's 256-color palette layout, which isn't
+  // otherwise readable from outside the running process.
+  DiagLoggedColorsPalDump: Boolean = False;
 
 implementation
 uses
@@ -30,7 +63,69 @@ uses
   Math,
   TA_FunctionsU,
   logging,
+  BuildInfo,
   Colors;
+
+// ---- Bounds-check diagnostic log --------------------------------------------
+// DrawUnitSelectBox indexes UnitInfoCustomFields[nUnitInfoID] and
+// UnitsCustomFields[UnitID] every frame for every selected unit, with no
+// bounds check (unlike other call sites in this codebase - see
+// UnitInfoExpand.FreeCustomUnitInfo and GetUnitInfoProperty, which both guard
+// their array access). An out-of-range index here used to be a raw
+// Access-Violation crash during normal play (Main Thread, inside tplayx.dll).
+// Self-contained append-mode log, same pattern as Plugins.pas's Log() -
+// doesn't depend on TLog being initialized elsewhere.
+// AUDIT 28 Sep: raw writer. Used directly only by the rate-limited
+// LogDiagOnce (error paths); LogDiag below is debug-build only.
+procedure WriteDiagLine(const Msg: string);
+var
+  DiagLogFile: TextFile;
+  DiagLogPath: string;
+begin
+  try
+    DiagLogPath := ExtractFilePath(ParamStr(0)) + 'tplayx_diag.log';
+    AssignFile(DiagLogFile, DiagLogPath);
+    {$I-}
+    if FileExists(DiagLogPath) then
+      Append(DiagLogFile)
+    else
+      Rewrite(DiagLogFile);
+    {$I+}
+    if IOResult <> 0 then Exit;
+    Writeln(DiagLogFile, FormatDateTime('yyyy-mm-dd hh:nn:ss', Now) + '  ' + Msg);
+    CloseFile(DiagLogFile);
+  except end;
+end;
+
+// Verbose diagnostic line - compiled out unless -dTPLAYX_DEBUG.
+procedure LogDiag(const Msg: string);
+begin
+  {$IFDEF TPLAYX_DEBUG}
+  WriteDiagLine(Msg);
+  {$ENDIF}
+end;
+
+// Same as LogDiag, but only writes the first time it's called across this
+// whole unit for the current process. Use this at any per-frame draw call
+// site so a persistently out-of-range unit doesn't spam tplayx_diag.log.
+procedure LogDiagOnce(const Msg: string); overload;
+begin
+  if DiagLoggedOnce then Exit;
+  DiagLoggedOnce := True;
+  WriteDiagLine(Msg + ' (further occurrences this session will not be logged)');
+end;
+
+// Public overload for other units: caller supplies its OWN Boolean flag
+// (by reference) instead of sharing this unit's DiagLoggedOnce, so several
+// distinct diagnostic messages from different units/call sites don't
+// compete for a single "already logged" flag and suppress each other.
+procedure LogDiagOnce(var AOnceFlag: Boolean; const Msg: string); overload;
+begin
+  if AOnceFlag then Exit;
+  AOnceFlag := True;
+  WriteDiagLine(Msg + ' (further occurrences this session will not be logged)');
+end;
+// -----------------------------------------------------------------------------
 
 const
   STANDARDUNIT : cardinal = 250;
@@ -40,6 +135,25 @@ const
   EXTRALARGEUNIT : cardinal = 10000;
   VETERANLEVEL_RELOADBOOST = 12; // 30 * 0.2
   SCOREBOARD_WIDTH = 180;
+  // Empirical elmos-to-screen-pixels scale for the shield radius circle drawn
+  // in DrawUnitState (see below). The native DrawRangeCircle call needs a
+  // "CirclePointer" viewport struct that's read from a global
+  // (*(TAdynmemStructPtr)+0x391BF) which is confirmed via diagnostics to
+  // always be 0 outside the vanilla show-ranges UI pass - so instead we use
+  // DrawCircle, which draws directly in screen pixels using CenterPosX/
+  // CenterPosZ (already provided to this hook) with no viewport pointer at
+  // all. The tradeoff: DrawCircle can't account for camera zoom the way the
+  // native per-point projection would, so this is an approximation, not a
+  // pixel-exact conversion.
+  // Round 6: the original 0.0625 guess rendered a ~16px radius that was
+  // barely visible next to the CustAnim2 GAF ring (which visually looked
+  // roughly 150-175px radius on screen in a shared screenshot, for what was
+  // presumably ARMARAD's original/default ShieldRange of ~180 elmos before
+  // it got bumped up during testing) - implying something close to 1 pixel
+  // per elmo, not 1/16th. Re-estimated to 1.0 as a much closer starting
+  // point. Still an approximation, not measured pixel-exact - if the circle
+  // looks too big/small in game, this is the one constant to adjust.
+  SHIELD_RADIUS_ELMOS_TO_PIXELS = 1.0;
 
 procedure DrawUnitState(p_Offscreen: Pointer;
   Unit_p: PUnitStruct; CenterPosX: Integer; CenterPosZ: Integer); stdcall;
@@ -60,7 +174,14 @@ var
   UnitInfo : PUnitInfo;
   UnitBuildTimeLeft : Single;
   //UnitPos : TPosition;
-  
+
+  { custom radius circle (shield range etc.) - drawn via DrawCircle using
+    CenterPosX/CenterPosZ directly, since DrawUnitRangesShowrangesOff never
+    fires for NOWEAPON units and the native DrawRangeCircle's CirclePointer
+    is confirmed unavailable here - see round-5 comment below }
+  ShieldCirclePixelRadius : Integer;
+  ResurrectCirclePixelRadius : Integer;
+
   { hotkey group }
   BottomZ : Word;
   sGroup : PAnsiChar;
@@ -106,11 +227,32 @@ begin
     UnitId := TAUnit.GetId(Unit_p);
     ColorsPal := TAData.ColorsPalette;
 
+    // Diagnostic (2026-07-22 round 8): ColorsPal[N] (MainStruct+$DCB+N) is
+    // the same byte table used a few lines below via
+    // GetRaceSpecificColor(23/24/25) -> ColorsPal[10/14/12] for the health
+    // bar's green/yellow/red - i.e. ColorsPal[10] IS the actual raw palette
+    // byte the game itself uses to draw "healthy = green", already proven
+    // semantically correct by the existing health bar code. Dumping it here
+    // once gives us a real, confirmed byte value to plug into
+    // customrange1color for a green shield circle, instead of guessing at
+    // TA's palette layout from outside the process (which isn't otherwise
+    // readable - no palette file was found loose on disk, and there is no
+    // debug-accessible RGB table, only this byte-remap array).
+    if not DiagLoggedColorsPalDump then
+    begin
+      DiagLoggedColorsPalDump := True;  // AUDIT: was False -> logged EVERY FRAME (7 MB log, file open/close per frame)
+      LogDiag(Format('ColorsPal dump: [10(HPgood/green)]=%d [12(HPlow/red)]=%d [14(HPmed/yellow)]=%d [16]=%d [17]=%d [18]=%d [26(reload)]=%d [27(reclaim)]=%d [28(stockpile)]=%d',
+        [PByte(LongWord(ColorsPal)+10)^, PByte(LongWord(ColorsPal)+12)^, PByte(LongWord(ColorsPal)+14)^,
+         PByte(LongWord(ColorsPal)+16)^, PByte(LongWord(ColorsPal)+17)^, PByte(LongWord(ColorsPal)+18)^,
+         PByte(LongWord(ColorsPal)+26)^, PByte(LongWord(ColorsPal)+27)^, PByte(LongWord(ColorsPal)+28)^]));
+    end;
+
     if ((TAData.MainStruct.GameOptionMask and 1) = 1) and
        (CenterPosX <> 0) and
        (CenterPosZ <> 0) and
        (UnitInfo <> nil) then
     begin
+
       LocalUnit := (PPlayerStruct(Unit_p.p_Owner).cPlayerIndex = TAData.LocalPlayerID);
 //      DrawTransparentBox(p_Offscreen, @Rect, -24);
       if LocalUnit then
@@ -148,6 +290,7 @@ begin
           end;
 
           if (UnitHealth <= UnitMaxHP) and
+             (UnitInfo.nCategory <= High(UnitInfoCustomFields)) and
              not UnitInfoCustomFields[UnitInfo.nCategory].HideHPBar then
           begin
             HPFillRectWidth := (HPBackgRectWidth div 2);
@@ -175,23 +318,90 @@ begin
               DrawBar(p_Offscreen, @RectDrawPos, PByte(LongWord(ColorsPal)+GetRaceSpecificColor(23))^);
           end;
 
+          // shield / custom radius circle (ARMARAD etc.). DrawUnitRangesShowrangesOff
+          // (the vanilla "draw unit ranges" hook) is confirmed via diagnostics to
+          // never fire for NOWEAPON units, so it's structurally unreachable for
+          // ARMARAD - drawn here instead, since DrawUnitState is confirmed to run
+          // every frame for ARMARAD regardless of weapon status.
+          // Round 5: the native DrawRangeCircle attempt (kept in git history)
+          // is out - its CirclePointer parameter is confirmed via diagnostics
+          // to always resolve to 0 in this hook's context (the global that
+          // caches it is only populated inside the vanilla show-ranges pass).
+          // DrawCircle instead draws a plain screen-space circle directly
+          // from CenterPosX/CenterPosZ (already provided to this hook) and a
+          // pixel radius we compute ourselves - no viewport pointer needed.
+          // Round 6: switched the radius source from CustomRange1Distance to
+          // ShieldRange. Those are two SEPARATE FBI tags (customrange1dist
+          // vs ShieldRange) - CustomRange1Distance is a cosmetic-only value
+          // used elsewhere for a different purpose, while ShieldRange is the
+          // one actually fed into CallbackForUnitsInDistance in
+          // ExtraDataReload (UnitActions.pas) that determines real shield
+          // protection. Confirmed via diagnostics that a live test had these
+          // set to two different values (250 vs 400) - the circle was
+          // drawing the wrong number entirely, not just at the wrong scale.
+          // This also naturally stops the circle showing on unrelated unit
+          // types (e.g. a radar tower) that have CustomRange1Distance set
+          // for their own purposes but ShieldRange=0.
+          if (UnitInfo.nCategory <= High(UnitInfoCustomFields)) and
+             (UnitInfoCustomFields[UnitInfo.nCategory].ShieldRange <> 0) then
+          begin
+            ShieldCirclePixelRadius := Round(UnitInfoCustomFields[UnitInfo.nCategory].ShieldRange *
+              SHIELD_RADIUS_ELMOS_TO_PIXELS);
+            if ShieldCirclePixelRadius > 0 then
+            begin
+              LogDiagOnce(DiagLoggedRadiusCircleDrawn,
+                Format('DrawUnitState: drawing ShieldRange circle via DrawCircle, nCategory=%d shieldRange=%d pixelRadius=%d color=%d centerX=%d centerZ=%d',
+                  [UnitInfo.nCategory, UnitInfoCustomFields[UnitInfo.nCategory].ShieldRange,
+                   ShieldCirclePixelRadius, UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Color,
+                   CenterPosX, CenterPosZ]));
+              DrawCircle(p_Offscreen, CenterPosX, CenterPosZ, ShieldCirclePixelRadius,
+                Byte(UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Color));
+            end;
+          end;
+
+          // "Portal" auto-resurrect radius circle (2026-07-23): same
+          // DrawCircle approach as the ShieldRange circle above, but keyed
+          // on the STANDARD engine nBuildDistance field (not a custom FBI
+          // tag) for any stationary (p_MovementClass=nil) canresurrect unit,
+          // so the circle always matches exactly what
+          // Portal_AutoResurrectScan (UnitActions.pas) actually searches -
+          // one shared radius value driving both, instead of the previous
+          // customrange1dist=128 guess that didn't match real behavior.
+          if (UnitInfo.nCategory <= High(UnitInfoCustomFields)) and
+             (Unit_p.p_MovementClass = nil) and
+             (TAUnit.GetUnitInfoField(Unit_p, uiCanResurrect) <> 0) and
+             (UnitInfo.nBuildDistance > 0) then
+          begin
+            ResurrectCirclePixelRadius := Round(UnitInfo.nBuildDistance *
+              SHIELD_RADIUS_ELMOS_TO_PIXELS);
+            if ResurrectCirclePixelRadius > 0 then
+              DrawCircle(p_Offscreen, CenterPosX, CenterPosZ, ResurrectCirclePixelRadius,
+                Byte(UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Color));
+          end;
+
         // weapons reload
         if ((IniSettings.MinWeaponReload <> 0) or
-           (UnitInfoCustomFields[UnitInfo.nCategory].UseCustomReloadBar)) and
+           ((UnitInfo.nCategory <= High(UnitInfoCustomFields)) and
+            UnitInfoCustomFields[UnitInfo.nCategory].UseCustomReloadBar)) and
            (UnitBuildTimeLeft = 0.0) then
         begin
           MaxReloadTime := 0;
           CurReloadTime := 0;
           StockPile := 0;
           CustomReloadBar := False;
-          if UnitInfoCustomFields[UnitInfo.nCategory].UseCustomReloadBar then
+          if (UnitInfo.nCategory <= High(UnitInfoCustomFields)) and
+             UnitInfoCustomFields[UnitInfo.nCategory].UseCustomReloadBar then
           begin
-            if UnitsCustomFields[UnitId].CustomWeapReloadMax > 0 then
+            if (UnitId <= High(UnitsCustomFields)) and
+               (UnitsCustomFields[UnitId].CustomWeapReloadMax > 0) then
             begin
               MaxReloadTime := UnitsCustomFields[UnitId].CustomWeapReloadMax;
               CurReloadTime := UnitsCustomFields[UnitId].CustomWeapReloadCur;
               CustomReloadBar := True;
-            end;
+            end
+            else if UnitId > High(UnitsCustomFields) then
+              LogDiagOnce(Format('DrawUnitState reload bar: UnitId=%d out of range (High(UnitsCustomFields)=%d)',
+                [UnitId, High(UnitsCustomFields)]));
           end else
           begin
             if (Unit_p.UnitWeapons[0].p_Weapon <> nil) or
@@ -231,12 +441,16 @@ begin
             end;
           end;
 
-          if UnitsCustomFields[UnitId].TeleportReloadMax > 0 then
+          if (UnitId <= High(UnitsCustomFields)) and
+             (UnitsCustomFields[UnitId].TeleportReloadMax > 0) then
           begin
             MaxReloadTime := UnitsCustomFields[UnitId].TeleportReloadMax;
             CurReloadTime := UnitsCustomFields[UnitId].TeleportReloadCur;
             CustomReloadBar := True;
-          end;
+          end
+          else if UnitId > High(UnitsCustomFields) then
+            LogDiagOnce(Format('DrawUnitState teleport reload: UnitId=%d out of range (High(UnitsCustomFields)=%d)',
+              [UnitId, High(UnitsCustomFields)]));
 
           if MaxReloadTime <> 0 then
           begin
@@ -400,7 +614,12 @@ begin
             DrawTextCustomFont(p_Offscreen, PAnsiChar(IntToStr(Unit_p.UnitWeapons[0].cStock)), Word(CenterPosX), Word(CenterPosZ) - 13, -1);
 
         // transporter count
-        if IniSettings.Transporters then
+        if IniSettings.Transporters and
+           (UnitInfo.nCategory > High(UnitInfoCustomFields)) then
+          LogDiagOnce(Format('DrawUnitState transporter: nCategory=%d out of range (High(UnitInfoCustomFields)=%d)',
+            [UnitInfo.nCategory, High(UnitInfoCustomFields)]));
+        if IniSettings.Transporters and
+           (UnitInfo.nCategory <= High(UnitInfoCustomFields)) then
         begin
           if (UnitInfo.UnitTypeMask and 2048 = 2048) then   // unit is air
           begin
@@ -610,7 +829,11 @@ begin
 
   if SideData.lSideIdx <= High(ExtraSideData) then
   begin
-    if UnitsCustomFields[TAUnit.GetId(p_Unit)].ShieldedBy <> nil then
+    if (TAUnit.GetId(p_Unit) > High(UnitsCustomFields)) then
+      LogDiagOnce(Format('DrawHealthPercentage: UnitId=%d out of range (High(UnitsCustomFields)=%d)',
+        [TAUnit.GetId(p_Unit), High(UnitsCustomFields)]));
+    if (TAUnit.GetId(p_Unit) <= High(UnitsCustomFields)) and
+       (UnitsCustomFields[TAUnit.GetId(p_Unit)].ShieldedBy <> nil) then
     begin
       if ExtraSideData[SideData.lSideIdx].rectShieldIcon.Left <> 0 then
       begin
@@ -664,6 +887,13 @@ function DrawUnitRangesShowrangesOn(p_Offscreen: Pointer; CirclePointer: Cardina
   UnitOrder: PUnitOrder; ReturnVal: Integer): Integer; stdcall;
 begin
   // as a result give amount of circles that were drawn
+  if UnitInfo.nCategory > High(UnitInfoCustomFields) then
+  begin
+    LogDiagOnce(Format('DrawUnitRangesShowrangesOn: nCategory=%d out of range (High=%d)',
+      [UnitInfo.nCategory, High(UnitInfoCustomFields)]));
+    Result := ReturnVal;
+    Exit;
+  end;
   if ( UnitInfoCustomFields[UnitInfo.nCategory].TeleportMinDistance <> 0 ) then
   begin
     Inc(ReturnVal);
@@ -729,9 +959,40 @@ begin
   UnitInfo := UnitOrder.p_Unit.p_UnitInfo;
   if UnitInfo = nil then
     Exit;
-    
+  if UnitInfo.nCategory > High(UnitInfoCustomFields) then
+  begin
+    LogDiagOnce(Format('DrawUnitRangesShowrangesOff: nCategory=%d out of range (High=%d)',
+      [UnitInfo.nCategory, High(UnitInfoCustomFields)]));
+    Exit;
+  end;
+
+  // Diagnostic (2026-07-22): confirms this hook actually runs (i.e. fires
+  // for a selected unit at all) and what CustomRange1Distance it sees -
+  // see ARMARAD shield-radius-circle investigation. Logs the first call
+  // only, regardless of which unit triggered it.
+  LogDiagOnce(DiagLoggedRangeHookSeen,
+    Format('DrawUnitRangesShowrangesOff running: nCategory=%d CustomRange1Distance=%d CustomRange1Color=%d',
+      [UnitInfo.nCategory, UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Distance,
+       UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Color]));
+
+  // Diagnostic (round 3): logs the FIRST time THIS SPECIFIC nCategory reaches
+  // here, so ARMARAD (nCategory=18) gets its own guaranteed log line even if
+  // some other unit's nCategory already used up DiagLoggedRangeHookSeen above.
+  if (UnitInfo.nCategory >= 0) and (UnitInfo.nCategory <= High(DiagSeenRangeCategory))
+     and not DiagSeenRangeCategory[UnitInfo.nCategory] then
+  begin
+    DiagSeenRangeCategory[UnitInfo.nCategory] := True;
+    LogDiag(Format('DrawUnitRangesShowrangesOff: nCategory=%d first seen here, CustomRange1Distance=%d CustomRange1Color=%d',
+      [UnitInfo.nCategory, UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Distance,
+       UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Color]));
+  end;
+
   if ( UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Distance <> 0 ) then
   begin
+    LogDiagOnce(DiagLoggedRangeCircleDrawn,
+      Format('DrawUnitRangesShowrangesOff: drawing CustomRange1 circle, nCategory=%d dist=%d color=%d',
+        [UnitInfo.nCategory, UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Distance,
+         UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Color]));
     DrawRangeCircle(
         p_Offscreen,
         CirclePointer,
@@ -739,7 +1000,7 @@ begin
         UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Distance,
         UnitInfoCustomFields[UnitInfo.nCategory].CustomRange1Color,
         nil,
-        0); 
+        0);
   end;
   if ( UnitInfoCustomFields[UnitInfo.nCategory].CustomRange2Distance <> 0 ) then
   begin
@@ -877,6 +1138,12 @@ begin
   DrawTextCustomFont(p_Offscreen, PAnsiChar(Str), Left, Top, MaxWidth);
 end;
 
+// kill/loss flash arrays in the exe are only 10 bytes (players 0..9)
+function FlashCol(Base: Cardinal; Idx: Byte): Byte;
+begin
+  if Idx < 10 then Result := PByte(Base + Idx)^ else Result := 0;
+end;
+
 procedure DrawScoreboard(p_Offscreen: Pointer); stdcall;
 var
   i: Integer;
@@ -969,8 +1236,11 @@ begin
   ScoreBoardPos.Left := GetTA_ScreenWidth - PInteger(ScoreBoardRoll)^;
   ScoreBoardPos.Right := ScoreBoardPos.Left + ScoreBoardWidth;
   ScoreBoardPos.Top := 32;
-  ScoreBoardPos.Bottom := 40 * (TAData.MainStruct.nActivePlayersCount) + 46;
+  ScoreBoardPos.Bottom := 40 * (TAData.MainStruct.nActivePlayersCount) + 46 + 15;
   DrawTransparentBox(p_Offscreen, @ScoreBoardPos, -26);
+  // credit line at the bottom of the scoreboard
+  DrawText(p_Offscreen, PAnsiChar(TA16P_SHORT),
+    ScoreBoardPos.Left + 5, ScoreBoardPos.Bottom - 14, ScoreBoardWidth - 10, 0);
 
   DrawText(p_Offscreen, TranslateString(PAnsiChar('Kills')),
     ScoreBoardPos.Left + 5, ScoreBoardPos.Top, 119, 0);
@@ -1003,7 +1273,7 @@ begin
              (PlayerType = Player_LocalAI) or
              (PlayerType = Player_RemotePlayer) then
           begin
-            if (PlayerPtr.cPlayerIndex <> 10) then
+            if (PlayerPtr.cPlayerIndex <> $FF) then
               if (PlayerPtr.nNumUnits <> 0) and (PlayerPtr.lUnitsCounter <> 0) then
                 if ((PlayerPtr.PlayerInfo^.PropertyMask and $40) = 0) then
                   if (PlayerPtr.cPlayerScoreboard = cCurActivePlayer) then
@@ -1012,7 +1282,7 @@ begin
         end;
         Inc(IteratePlayerIdx);
         PlayerPtr := TAPlayer.GetPlayerByIndex(IteratePlayerIdx);
-        if IteratePlayerIdx = 10 then
+        if IteratePlayerIdx = 16 then
         begin
           bDraw := False;
           Break;
@@ -1065,7 +1335,7 @@ begin
       else
         Counter := PlayerPtr.nKills;
       DrawText(p_Offscreen, PAnsiChar(IntToStr(Counter)),
-        TextLeftOff, PlayersDrawListTop + 21, 119, PByte($51F2C8 + IteratePlayerIdx)^);
+        TextLeftOff, PlayersDrawListTop + 21, 119, FlashCol($51F2C8, IteratePlayerIdx));
 
       if ( TAData.MainStruct.bAlterKills = 2 ) then
         Counter := PlayerPtr.nLosses_Last
@@ -1073,9 +1343,9 @@ begin
         Counter := PlayerPtr.nLosses;
       DrawText(p_Offscreen, PAnsiChar(IntToStr(Counter)),
         ScoreBoardPos.Left + ScoreBoardWidth-6 - GetStrExtent(PAnsiChar(IntToStr(Counter))) - 2,
-        PlayersDrawListTop + 21, 119, PByte($51E810 + IteratePlayerIdx)^);
+        PlayersDrawListTop + 21, 119, FlashCol($51E810, IteratePlayerIdx));
 
-      if TAData.GameingType = gtSkirmish then
+      if (TAData.GameingType = gtSkirmish) or TAData.NetworkLayerEnabled then
       begin
         p_OldFont := GetFontType;
         SetFontType(TAData.MainStruct.p_Font_SMLFONT);
@@ -1141,11 +1411,11 @@ begin
       end;  }
       PlayersDrawListTop := PlayersDrawListTop + 40;
 SortPlayers:
-      if ( IteratePlayerIdx = 10 ) then
+      if ( IteratePlayerIdx = 16 ) then
       begin
         cCurActiveSortPlayer := 0;
         PlayerSort := TAPlayer.GetPlayerByIndex(cCurActiveSortPlayer);
-        cIterateSort := 10;
+        cIterateSort := 16;
         repeat
           if ( TAPlayer.IsActive(PlayerSort) ) then
           begin
@@ -1154,7 +1424,7 @@ SortPlayers:
                (PlayerSortType = Player_LocalAI) or
                (PlayerSortType = Player_RemotePlayer) then
             begin
-              if (PlayerSort.cPlayerIndex <> 10) then
+              if (PlayerSort.cPlayerIndex <> $FF) then
                 if (PlayerSort.nNumUnits <> 0) then
                   if ((PlayerSort.PlayerInfo^.PropertyMask and $40) = 0) then
                     if (PlayerSort.cPlayerScoreboard > cCurActivePlayer) then
@@ -1357,6 +1627,17 @@ var
   p_Animation: PGAFSequence;
   UnitID: Word;
 begin
+  // Defensive bounds check: nUnitInfoID indexes UnitInfoCustomFields (sized to
+  // IniSettings.UnitType at load). If it's ever out of range - bad/freed unit
+  // state, whatever - fall back to the plain rect box instead of an AV.
+  if p_Unit.nUnitInfoID > High(UnitInfoCustomFields) then
+  begin
+    LogDiagOnce(Format('DrawUnitSelectBox: nUnitInfoID=%d out of range (High(UnitInfoCustomFields)=%d) - falling back to rect box',
+      [p_Unit.nUnitInfoID, High(UnitInfoCustomFields)]));
+    DrawUnitSelectBoxRect(p_Offscreen, p_Unit);
+    Exit;
+  end;
+
   if (UnitInfoCustomFields[p_Unit.nUnitInfoID].SelectBoxType = 2) and
      (UnitInfoCustomFields[p_Unit.nUnitInfoID].SelectAnimation <> 0) then
   begin
@@ -1364,6 +1645,16 @@ begin
     if p_Animation <> nil then
     begin
       UnitID := TAUnit.GetId(p_Unit);
+      // Same check for UnitsCustomFields (sized to IniSettings.UnitLimit *
+      // MAXPLAYERCOUNT at load) - this is the array actually implicated in
+      // the "random" crash after ~45s of normal play.
+      if UnitID > High(UnitsCustomFields) then
+      begin
+        LogDiagOnce(Format('DrawUnitSelectBox: UnitID=%d out of range (High(UnitsCustomFields)=%d) - falling back to rect box',
+          [UnitID, High(UnitsCustomFields)]));
+        DrawUnitSelectBoxRect(p_Offscreen, p_Unit);
+        Exit;
+      end;
       ScreenPos.X := p_Unit.Position.X - (TAData.MainStruct.lEyeBallMapX shl 16);
       ScreenPos.Y := p_Unit.Position.Y;
       ScreenPos.Z := p_Unit.Position.Z - (TAData.MainStruct.lEyeBallMapY shl 16);

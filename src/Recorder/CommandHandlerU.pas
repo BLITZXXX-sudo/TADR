@@ -158,6 +158,17 @@ for i := 0 to fCommands.Count-1 do
 fCommands.Clear;
 end; {ClearCommands}
 
+function BlitzCommandHandler(const Command: string; Sender: TPlayerData; params: TStringList): Boolean;
+begin
+  // Your custom logic goes here. 
+  // For example, if you want to trigger an action in the game:
+  //GlobalDPlay.SendChat('Blitz command executed!'); 
+  
+  // Return True to indicate the command was handled successfully
+  Result := True;
+end;
+
+
 procedure TCommands.RemoveCommand( const aName : string );
 var
   i : Integer;

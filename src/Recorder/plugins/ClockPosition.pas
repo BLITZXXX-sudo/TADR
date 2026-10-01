@@ -20,11 +20,41 @@ Procedure OnUninstallClockPosition;
 
 implementation
 uses
+  SysUtils,
   IniOptions,
   TA_MemoryConstants,
   TA_MemoryStructures,
   TA_MemoryLocations,
   TA_FunctionsU;
+
+// NOTE: originally wrote to tplayx_init.log, but Plugins.pas holds that file
+// open (its own handle) for the whole registration loop this runs inside of
+// - a second handle on the same path hit a sharing conflict, IOResult was
+// non-zero, and the silent {$I-} exit swallowed it with no output and no
+// exception. Using a dedicated file instead, same pattern as
+// GUIEnhancements.pas's tplayx_diag.log.
+procedure LogClockDiag(const Msg: string);
+{$IFDEF TPLAYX_DEBUG}
+var
+  LogFile: TextFile;
+  LogPath: string;
+{$ENDIF}
+begin
+  // AUDIT 28 Sep: diagnostic only. The clock plugin draws text and has no
+  // network code at all (no send / broadcast) - nothing to silence there.
+  {$IFDEF TPLAYX_DEBUG}
+  try
+    LogPath := ExtractFilePath(ParamStr(0)) + 'tplayx_clock_diag.log';
+    AssignFile(LogFile, LogPath);
+    {$I-}
+    if FileExists(LogPath) then Append(LogFile) else Rewrite(LogFile);
+    {$I+}
+    if IOResult <> 0 then Exit;
+    Writeln(LogFile, FormatDateTime('yyyy-mm-dd hh:nn:ss', Now) + '  ' + Msg);
+    CloseFile(LogFile);
+  except end;
+  {$ENDIF}
+end;
 
 procedure ClockMove_LeftBottom;
 asm
@@ -106,6 +136,9 @@ begin
                                   State_ClockPosition,
                                   @OnInstallClockPosition,
                                   @OnUninstallClockPosition );
+
+    LogClockDiag('IniSettings.ClockPosition=' + IntToStr(IniSettings.ClockPosition) +
+      ' (0 = disabled/no-op by design, 1=bottom-left 2=bottom-right 3=top-left 4=top-right)');
 
     if IniSettings.ClockPosition <> 0 then
     begin

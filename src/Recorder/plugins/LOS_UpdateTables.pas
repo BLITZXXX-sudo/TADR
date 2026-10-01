@@ -135,7 +135,7 @@ TryNextPlayer_Condition:
   mov ecx, type TPlayerStruct
   mul ecx;
   mov ecx, [TADynmemStructPtr];
-  lea ecx, [ecx+TTADynMemStruct.Players];
+  lea ecx, [ecx+TTADynMemStruct.PlayersExt];
   add eax, ecx
 
   //  if (!NextPlayer.Active) continue;
@@ -256,7 +256,7 @@ TryNextPlayer_Condition:
   mov ecx, type TPlayerStruct
   mul ecx;
   mov ecx, [TADynmemStructPtr];
-  lea ecx, [ecx+TTADynMemStruct.Players];
+  lea ecx, [ecx+TTADynMemStruct.PlayersExt];
   add eax, ecx
 
   //  if (!NextPlayer.Active) continue;

@@ -1,7 +1,7 @@
 unit TA_MemoryStructures;
 
 interface
-uses Classes, Types, logging;
+uses Classes, Types;
 
 const
   BUTTON_ORDER_STOP = 1;
@@ -597,6 +597,17 @@ type
     AddPlayerStorage     : Word;
   end;
 
+// ---------------------------------------------------------------------------
+// TPlayerStruct_size_check
+// TPlayerStruct MUST stay exactly $14B (331) bytes - that is the stride the
+// TA exe uses to walk the player array at TAMain+$3A000.  If a field is added
+// or resized, take the bytes out of a padding field so the total is unchanged.
+// ---------------------------------------------------------------------------
+{$IF SizeOf(TPlayerStruct) <> $14B}
+  {$MESSAGE FATAL 'TPlayerStruct must be exactly $14B (331) bytes'}
+{$IFEND}
+
+
 type
   TFeatureMaskInfo = ( fiHasObject,
                        fiAnimating,
@@ -920,342 +931,350 @@ type
     nState          : Word;
   end;
 
-  PTAdynmemStruct = ^TTAdynmemStruct;
-  TTAdynmemStruct = packed record
-    sTAVersionStr          : array [0..3] of AnsiChar;
-    sBuildDate             : PAnsiChar;
-    sBuildTime             : PAnsiChar;
-    p_TAProgram            : Pointer;
-    p_DSound               : Pointer;
-    p_HAPINETObject        : Pointer;
-    Unknown1               : array [0..1200] of Byte;
-    lLocalDirectPlayID     : Cardinal;
-    lUnknownPlayerID       : Cardinal;
-    Unknown2               : array [0..71] of Byte;
-    p_TAGUIObject          : Pointer;
-    Unknown3               : array [0..107] of Byte;
-    cAlteredUnitLimit      : Byte;              
-    Unkonwn4               : array [0..2126] of Byte;
-    cPlayerCameraRectColor : Byte;
-    Unknown5               : array [0..1300] of Byte;
-    p_ChatTextBegin        : Pointer;
-    Unknown6               : array [0..58] of Byte;
-    lUnknown7              : Cardinal;
-    cUnknown8              : array [0..1781] of Byte;
-    lUnknown9              : Cardinal;
-    Unknown10              : array [0..310] of Byte;
-    Players                : array [0..10] of TPlayerStruct; //starts at 0x1B63 and each player is 0x14B (331) bytes long
-    lUnknown12             : Cardinal;
-    p_AllyData             : Pointer; //xon's IDA database gives as SkirmishCommanderDeath dd ?
-    Unknown13              : array [0..143] of Byte;
-    lPacketBufferSize      : Cardinal;
-    p_BacketBuffer         : Pointer;
-    nActivePlayersCount    : Word;
-    lChatTextIndex         : Cardinal;
-    cControlPlayerID       : Byte;
-    cViewPlayerID          : Byte; //the player id to use for los calcs
-    cNetworkLayerEnabled   : Byte;
-    cUnknown14             : array [0..560] of Byte;
-    CurtMousePosition      : TPoint;
-    field_2C7E             : array [0..15] of Byte;
-    nBuildPosX             : SmallInt; //0x2C8E
-    nBuildPosY             : SmallInt;
-    lBuildPosRealX         : Integer; //0x2C92
-    lHeight                : Integer;
-    lBuildPosRealY         : Integer;
-    lUnknown15             : Integer;
-    lBuildPosRealH         : Integer;
-    Unknown16              : array [0..5] of Byte;
-    nMouseMapPosX          : Word; //0x2CAC
-    Unknown17              : array [0..5] of Byte;
-    nMouseMapPosY          : Word; //0x2CB4
-    Unknown18              : array [0..3] of Byte;
-    unMouseOverUnit        : Word; //0x2CBA
-    Unknown19              : array [0..6] of Byte;
-    ucPrepareOrderType     : Byte;
-    nBuildNum              : Word; //0x2CC4, unitindex for selected unit to build
-    cBuildSpotState        : Byte; //0x40=notoktobuild
-    Unknown20              : array [0..43] of Byte;
-    Weapons                : array [0..255] of TWeaponDef; //0x2CF3 size=0x11500
-    lNumProjectiles        : Cardinal;
-    p_Projectiles          : Pointer; //0x141F7
-    TNTMemStruct           : TTNTMemStruct;
-    field_1428F            : Pointer;
-    field_14293            : Pointer;
-    field_14297            : Pointer;
-    field_1429B            : Pointer;
-    field_1429F            : Pointer;
-    field_142A3            : Cardinal; // footprint grid size in px x ?
-    field_142A7            : Cardinal; // footprint grid size in px z ?
-    field_142AB            : Pointer;
-    field_142AF            : Pointer;
-    field_142B3            : Pointer;
-    field_142B7            : Pointer;
-    MinimapMouseRect       : tagRECT; //0x142BB
-    MinimapEyeBallRect     : tagRECT; //0x142CB
-    p_RadarFinal           : Pointer; //0x142DB
-    p_RadarMapped          : Pointer; //0x142DF
-    p_RadarPicture         : Pointer; //0x142E3
-    RadarPicRect_left      : Word;
-    RadarPicRect_top       : Word;
-    RadarPicRect_right     : Word;
-    RadarPicRect_bottom    : Word;
-    nUnknown26             : Word;
-    nUnknown27             : Word;
-    pCameraToUnit          : Pointer; //0x142F3
-    Unknown28              : array [0..39] of Byte;
-    lEyeBallMapX           : Integer; //0x1431F
-    lEyeBallMapY           : Integer; //0x14323
-    lEyeBallMapXScrollTo   : Integer; //0x14327
-    lEyeBallMapYScrollTo   : Integer; //0x1432B
-    field_1432F            : Cardinal;
-    field_14333            : Cardinal;
-    ShakeMagnitude_1       : Cardinal;
-    ShakeMagnitude_2       : Cardinal;
-    field_1433F            : Cardinal;
-    field_14343            : Cardinal;
-    field_14347            : Cardinal;
-    lastWeaponHoldTime     : Word;
-    bScrollSpeed           : Byte;
-    cShake                 : Byte;
-    nEveryPlayerUnitsNr    : Word;
-    Unknown30              : array [0..1] of Byte;
-    lNumTotalGameUnits     : Cardinal;
-    p_Units                : Pointer; //0x14357
-    p_LastUnitInArray      : Pointer;
-    nHotUnits              : Cardinal;//0x1435F
-    nHotRadarUnits         : Cardinal;
-    lnNumHotUnits          : Cardinal; //0x14367
-    lnNumHotRadarUnits     : Cardinal; //0x1436B
-    unknow_20              : Word;
-    Bigbrother             : Word;
-    Bigbrother_            : Cardinal;
-    p_MODEL_PTRS           : Pointer;
-    ModelMapBuffer         : Cardinal;
-    field_1437F            : Cardinal;
-    TEMP_XFORM_PTS         : Cardinal;
-    TEMP_PROJECTED_PTS     : Cardinal;
-    ASSEM_PTS              : Cardinal;
-    lNumUnitTypeDefs       : Cardinal;
-    lNumUnitTypeDefs_Sqrt  : Cardinal;
-    LoadedUNITINFO         : Cardinal;
-    p_UNITINFOs            : Pointer; //0x1439B
-    unknow_21              : array [0..7] of Byte;
-    palettes               : array [0..1023] of Byte;
-    baseheight             : Word;
-    field_147A9            : Word;
-    Animation_Counts       : Integer;
-    Animation_Files        : Pointer;
-    field_147B3            : array [0..7] of Byte;
-    cannonshell            : PGAFSequence;
-    plasmasm               : PGAFSequence;
-    plasmamd               : PGAFSequence;
-    ultrashell             : PGAFSequence;
-    plasmasm_              : PGAFSequence;
-    smoke_1                : PGAFSequence;
-    smoke_2                : PGAFSequence;
-    fire1                  : PGAFSequence;
-    alfboom1               : PGAFSequence;
-    radlogo                : PGAFSequence;
-    radlogohigh            : PGAFSequence;
-    nuclogo                : PGAFSequence;
-    h2oboom2               : PGAFSequence;
-    lavasplash             : PGAFSequence;
-    flamestream            : PGAFSequence;
-    explosion              : PGAFSequence;
-    explode2               : PGAFSequence;
-    explode3               : PGAFSequence;
-    explode4               : PGAFSequence;
-    explode5               : PGAFSequence;
-    nuke1                  : PGAFSequence;
-    shadow                 : PGAFSequence;
-    igvictory              : PGAFSequence;
-    igdefeat               : PGAFSequence;
-    igpaused               : PGAFSequence;
-    PANELTOP               : array [0..4] of Cardinal;
-    PANELBOT               : array [0..4] of Cardinal;
-    PANELSIDE              : Cardinal;
-    field_1484B            : array [0..15] of Byte;
-    p_FogOfWar             : Pointer;
-    Black1                 : Pointer;
-    Black2                 : Pointer;
-    Black3                 : Pointer;
-    Black4                 : Pointer;
-    Gray1                  : Pointer;
-    Gray2                  : Pointer;
-    Gray3                  : Pointer;
-    Gray4                  : Pointer;
-    p_cursor_ary           : Pointer;
-    p_Cursor_Attack        : Pointer; //0x14883
-    p_Cursor_AirStrike     : Pointer;
-    p_Cursor_TooFar        : Pointer;
-    p_Cursor_Capture       : Pointer;
-    p_Cursor_Defend        : Pointer;
-    p_Cursor_Repair        : Pointer;
-    p_Cursor_Patrol        : Pointer;
-    p_Cursor_Pickup        : Pointer;
-    p_Cursor_Teleport      : Pointer;
-    p_Cursor_Revive        : Pointer;
-    p_Cursor_Reclaim       : Pointer;
-    p_Cursor_Load          : Pointer;
-    p_Cursor_Unload        : Pointer;
-    p_Cursor_Move          : Pointer;
-    p_Cursor_Select        : Pointer;
-    p_Cursor_FindSite      : Pointer;
-    p_Cursor_Red           : Pointer;
-    p_Cursor_Green         : Pointer;
-    p_Cursor_Normal        : Pointer;
-    p_Cursor_Hourglass     : Pointer;
-    p_Cursor_PathIcon      : Pointer; //0x148D3
-    p_LogosGaf             : Pointer;
-    p_GafSequence_32xlogos : Pointer;
-    Unknown36              : array [0..59] of Byte;
-    lNumExplosions         : Cardinal; //0x1491B
-    Explosions             : array [1..300] of TExplosion; //0x1491F
-    pUnknown36             : Pointer; //0x1AB8F
-    Unknown37              : array [0..102011] of Byte;
-    lGUITextSound          : Cardinal; //0x33A0F
-    lGUISounds             : Cardinal; //0x33A13
-    Unknown38              : array [0..1019] of Byte;
-    lGUITextMap            : Cardinal; //0x33E13 - pointer to an array of strings (0x20 each)
-    Unknown39              : array [0..16379] of Byte;
-    pSoundClassAry         : Pointer; //0x37E13
-    lSoundClassNumber      : Cardinal; //0x37E17
-    ScreenOFFSCREEN        : Pointer;
-    ScreenWidth            : Integer;
-    ScreenHeight           : Integer;
-    GameUI_Rect            : tagRECT;
-    lInGamePos_X           : Cardinal; //0x37E37
-    lInGamePos_Y           : Cardinal;
-    ViewResBar             : TViewResBar;
-    Active_BottomState     : array [0..47] of Byte;
-    PopadBoxOffset         : Cardinal;
-    LIGHTBAR               : Pointer;
-    field_37E98            : Pointer;
-    ShowRangeUnitIndex     : Word;
-    field_37E9E            : Word;
-    CurtUnitGUIName        : array [0..29] of AnsiChar;
-    DesktopGUIState        : Byte;
-    RaceGenGUIState        : Byte;
-    field_37EC0            : Word;
-    field_37EC2            : Word;
-    field_37EC4            : Cardinal;
-    field_37EC8            : Cardinal;
-    field_37ECC            : Cardinal;
-    field_37ED0            : Cardinal;
-    field_37ED4            : Cardinal;
-    WindDirection          : array [0..13] of byte;
-    nPerMissionUnitLimit   : Word; //0x37EE6
-    nUnknown42             : Word;
-    nActualUnitLimit       : Word;
-    nMaxUnitLimitPerPlayer : Word;
-    lCurrentAIProfile      : Cardinal; //0x37EEE - xpoy's gives this as "Difficulty"
-    lSide                  : Cardinal; //0x37EF2
-    bAlterKills            : Cardinal;
-    lInterfaceType         : Cardinal;
-    lUnknown44             : Cardinal;
-    lSingleLOSType         : Cardinal;
-    GameOptionMask         : Byte; //0x37F06
-    damagebarsvalue        : Byte;
-    Gamma                  : Cardinal;
-    lFXVol                 : Cardinal; //0x37F0C
-    lMusicVol              : Cardinal;
-    nMusicMode             : Word;
-    cCDMode                : Byte; //0x37F16
-    cUnitChat              : Byte;
-    cUnitChatText          : Byte;
-    nackNBuildNSpeech_Fx   : Word; //0x37F19 - xpoy's gives as "SoundMode"
-    lDisplayModeWidth      : Cardinal;
-    lDisplayModeHeight     : Cardinal;
-    lTextScroll            : Cardinal; //0x37F23
-    lTextLines             : Cardinal;
-    lMouseSpeed            : Cardinal;
-    nSwitchesMask          : Word;
-    Unknown46              : array [0..11] of Byte;
-    RaceSideData           : array [0..4] of TRaceSideData;
-    RandNum_               : Cardinal;
-    field_38A3B            : Cardinal;
-    scrollLen_buf          : Cardinal;
-    field_38A43            : Cardinal;
-    lGameTime              : Integer; //0x38A47
-    nTAGameSpeed           : Word; //0x38A4B
-    nTAGameSpeed_Init      : Word;
-    field_38A4F            : Word;
-    cIsGamePaused          : Byte; //0x38A51
-    field_38A52            : Byte;
-    Image_Output_Dir       : array [0..255] of Byte;
-    Movie_Shot_Output_Dir  : array [0..255] of Byte;
-    field_38C53            : Cardinal;
-    lMovieOutputRate       : Cardinal; //0x38C57
-    lMovieNextFrameTick    : Cardinal;
-    field_38C5F            : Cardinal;
-    Movie                  : Cardinal;
-    field_38C67            : array [0..259] of Byte;
-    field_38D6B            : Cardinal;
-    bLoadProgTextures      : Byte;
-    bLoadProgTerrain       : Byte;
-    bLoadProgUnits         : Byte;
-    bLoadProgAnims         : Byte;
-    bLoadProg3DData        : Word;
-    nPlayersSynchMask      : Word;
-    SfxVectorArray_ptr     : Pointer;
-    SmackMovie_ptr         : Pointer;
-    field_38D7F            : Word;
-    lMaxPlayers            : Cardinal; //0x38D81 - xon's gives as "NumSkirmishPlayers"
-    CurrenttTick           : Cardinal;
-    field_38D89            : Cardinal;
-    ProfileAry             : array[0..31] of Byte;
-    field_38DAD            : Cardinal;
-    field_38DB1            : Cardinal;
-    field_38DB5            : array[0..31] of Byte;
-    IsDrawProfile_b        : Cardinal;
-    field_38DD9            : array[0..637] of Byte;
-    field_39057            : Cardinal;
-    field_3905B            : Cardinal;
-    field_3905F            : Cardinal;
-    field_39063            : Cardinal;
-    field_39067            : Cardinal;
-    field_3906B            : Cardinal;
-    field_3906F            : Cardinal;
-    field_39073            : Cardinal;
-    field_39077            : Cardinal;
-    field_3907B            : Cardinal;
-    Palette                : Pointer;
-    currentPalette         : Pointer;
-    desiredPalette         : Pointer;
-    FadeTable              : Pointer;
-    field_3908F            : Byte;
-    field_39090            : array[0..282] of Byte;
-    field_391AB            : Cardinal;
-    field_391AF            : Cardinal;
-    UnitStateProbeUnitEnab : Cardinal;
-    UnitStateProbeUnitID   : Word;
-    BuilderProbeEnab       : Cardinal;
-    BuilderProbeUnitID     : Word;
-    Showranges             : Cardinal;
-    bps                    : Cardinal;
-    field_391C7            : Cardinal;
-    field_391CB            : Cardinal;
-    field_391CF            : array[0..25] of Byte;
-    p_MapOTAFile           : PMapOTAFile; //0x391E9
-    Unknown52              : array [0..3] of Byte; //0x391ED - there's references to [p_TAMemory + 0x391ED] in ta.exe, so this is definitely something
-    lGUICallbackState      : Cardinal; //0x391F1
-    lGUICallback           : Cardinal; //0x391F5
-    p_Font_COMIX           : Pointer;
-    p_Font_SMLFONT         : Pointer;
-    Unknown53              : array [0..23] of Byte;
-    lSingleCommanderDeath  : Cardinal; //0x39219
-    lSingleMapping         : Cardinal;
-    lSingleLOS             : Cardinal;
-    lSingleLOSTypeOptions  : Cardinal;
-    lMultiCommanderDeath   : Cardinal; //0x39229
-    lMultiMapping          : Cardinal;
-    lMultiLOS              : Cardinal;
-    lMultiLOSTypeOptions   : Cardinal; //0x39235
-    Unknown54              : array [0..1] of Byte;
-    nGameState             : Word; //0x3923B
-    Unknown55              : array [0..3522] of Byte; //to get size to 0x3A000 (what xpoy's IDA db says the size of this struct is
-  end;
+    PTAdynmemStruct = ^TTAdynmemStruct;
+    TTAdynmemStruct = packed record
+      sTAVersionStr          : array [0..3] of AnsiChar;
+      sBuildDate             : PAnsiChar;
+      sBuildTime             : PAnsiChar;
+      p_TAProgram            : Pointer;
+      p_DSound               : Pointer;
+      p_HAPINETObject        : Pointer;
+      Unknown1               : array [0..1200] of Byte;
+      lLocalDirectPlayID     : Cardinal;
+      lUnknownPlayerID       : Cardinal;
+      Unknown2               : array [0..71] of Byte;
+      p_TAGUIObject          : Pointer;
+      Unknown3               : array [0..107] of Byte;
+      cAlteredUnitLimit      : Byte;
+      Unkonwn4               : array [0..2126] of Byte;
+      cPlayerCameraRectColor : Byte;
+      Unknown5               : array [0..1300] of Byte;
+      p_ChatTextBegin        : Pointer;
+      Unknown6               : array [0..58] of Byte;
+      lUnknown7              : Cardinal;
+      cUnknown8              : array [0..1781] of Byte;
+      lUnknown9              : Cardinal;
+      Unknown10              : array [0..310] of Byte;
+      Players                : array [0..10] of TPlayerStruct; //starts at 0x1B63 and each player is 0x14B (331) bytes long
+      lUnknown12             : Cardinal;
+      p_AllyData             : Pointer; //xon's IDA database gives as SkirmishCommanderDeath dd ?
+      Unknown13              : array [0..143] of Byte;
+      lPacketBufferSize      : Cardinal;
+      p_BacketBuffer         : Pointer;
+      nActivePlayersCount    : Word;
+      lChatTextIndex         : Cardinal;
+      cControlPlayerID       : Byte;
+      cViewPlayerID          : Byte; //the player id to use for los calcs
+      cNetworkLayerEnabled   : Byte;
+      cUnknown14             : array [0..560] of Byte;
+      CurtMousePosition      : TPoint;
+      field_2C7E             : array [0..15] of Byte;
+      nBuildPosX             : SmallInt; //0x2C8E
+      nBuildPosY             : SmallInt;
+      lBuildPosRealX         : Integer; //0x2C92
+      lHeight                : Integer;
+      lBuildPosRealY         : Integer;
+      lUnknown15             : Integer;
+      lBuildPosRealH         : Integer;
+      Unknown16              : array [0..5] of Byte;
+      nMouseMapPosX          : Word; //0x2CAC
+      Unknown17              : array [0..5] of Byte;
+      nMouseMapPosY          : Word; //0x2CB4
+      Unknown18              : array [0..3] of Byte;
+      unMouseOverUnit        : Word; //0x2CBA
+      Unknown19              : array [0..6] of Byte;
+      ucPrepareOrderType     : Byte;
+      nBuildNum              : Word; //0x2CC4, unitindex for selected unit to build
+      cBuildSpotState        : Byte; //0x40=notoktobuild
+      Unknown20              : array [0..43] of Byte;
+      Weapons                : array [0..255] of TWeaponDef; //0x2CF3 size=0x11500
+      lNumProjectiles        : Cardinal;
+      p_Projectiles          : Pointer; //0x141F7
+      TNTMemStruct           : TTNTMemStruct;
+      field_1428F            : Pointer;
+      field_14293            : Pointer;
+      field_14297            : Pointer;
+      field_1429B            : Pointer;
+      field_1429F            : Pointer;
+      field_142A3            : Cardinal; // footprint grid size in px x ?
+      field_142A7            : Cardinal; // footprint grid size in px z ?
+      field_142AB            : Pointer;
+      field_142AF            : Pointer;
+      field_142B3            : Pointer;
+      field_142B7            : Pointer;
+      MinimapMouseRect       : tagRECT; //0x142BB
+      MinimapEyeBallRect     : tagRECT; //0x142CB
+      p_RadarFinal           : Pointer; //0x142DB
+      p_RadarMapped          : Pointer; //0x142DF
+      p_RadarPicture         : Pointer; //0x142E3
+      RadarPicRect_left      : Word;
+      RadarPicRect_top       : Word;
+      RadarPicRect_right     : Word;
+      RadarPicRect_bottom    : Word;
+      nUnknown26             : Word;
+      nUnknown27             : Word;
+      pCameraToUnit          : Pointer; //0x142F3
+      Unknown28              : array [0..39] of Byte;
+      lEyeBallMapX           : Integer; //0x1431F
+      lEyeBallMapY           : Integer; //0x14323
+      lEyeBallMapXScrollTo   : Integer; //0x14327
+      lEyeBallMapYScrollTo   : Integer; //0x1432B
+      field_1432F            : Cardinal;
+      field_14333            : Cardinal;
+      ShakeMagnitude_1       : Cardinal;
+      ShakeMagnitude_2       : Cardinal;
+      field_1433F            : Cardinal;
+      field_14343            : Cardinal;
+      field_14347            : Cardinal;
+      lastWeaponHoldTime     : Word;
+      bScrollSpeed           : Byte;
+      cShake                 : Byte;
+      nEveryPlayerUnitsNr    : Word;
+      Unknown30              : array [0..1] of Byte;
+      lNumTotalGameUnits     : Cardinal;
+      p_Units                : Pointer; //0x14357
+      p_LastUnitInArray      : Pointer;
+      nHotUnits              : Cardinal;//0x1435F
+      nHotRadarUnits         : Cardinal;
+      lnNumHotUnits          : Cardinal; //0x14367
+      lnNumHotRadarUnits     : Cardinal; //0x1436B
+      unknow_20              : Word;
+      Bigbrother             : Word;
+      Bigbrother_            : Cardinal;
+      p_MODEL_PTRS           : Pointer;
+      ModelMapBuffer         : Cardinal;
+      field_1437F            : Cardinal;
+      TEMP_XFORM_PTS         : Cardinal;
+      TEMP_PROJECTED_PTS     : Cardinal;
+      ASSEM_PTS              : Cardinal;
+      lNumUnitTypeDefs       : Cardinal;
+      lNumUnitTypeDefs_Sqrt  : Cardinal;
+      LoadedUNITINFO         : Cardinal;
+      p_UNITINFOs            : Pointer; //0x1439B
+      unknow_21              : array [0..7] of Byte;
+      palettes               : array [0..1023] of Byte;
+      baseheight             : Word;
+      field_147A9            : Word;
+      Animation_Counts       : Integer;
+      Animation_Files        : Pointer;
+      field_147B3            : array [0..7] of Byte;
+      cannonshell            : PGAFSequence;
+      plasmasm               : PGAFSequence;
+      plasmamd               : PGAFSequence;
+      ultrashell             : PGAFSequence;
+      plasmasm_              : PGAFSequence;
+      smoke_1                : PGAFSequence;
+      smoke_2                : PGAFSequence;
+      fire1                  : PGAFSequence;
+      alfboom1               : PGAFSequence;
+      radlogo                : PGAFSequence;
+      radlogohigh            : PGAFSequence;
+      nuclogo                : PGAFSequence;
+      h2oboom2               : PGAFSequence;
+      lavasplash             : PGAFSequence;
+      flamestream            : PGAFSequence;
+      explosion              : PGAFSequence;
+      explode2               : PGAFSequence;
+      explode3               : PGAFSequence;
+      explode4               : PGAFSequence;
+      explode5               : PGAFSequence;
+      nuke1                  : PGAFSequence;
+      shadow                 : PGAFSequence;
+      igvictory              : PGAFSequence;
+      igdefeat               : PGAFSequence;
+      igpaused               : PGAFSequence;
+      PANELTOP               : array [0..4] of Cardinal;
+      PANELBOT               : array [0..4] of Cardinal;
+      PANELSIDE              : Cardinal;
+      field_1484B            : array [0..15] of Byte;
+      p_FogOfWar             : Pointer;
+      Black1                 : Pointer;
+      Black2                 : Pointer;
+      Black3                 : Pointer;
+      Black4                 : Pointer;
+      Gray1                  : Pointer;
+      Gray2                  : Pointer;
+      Gray3                  : Pointer;
+      Gray4                  : Pointer;
+      p_cursor_ary           : Pointer;
+      p_Cursor_Attack        : Pointer; //0x14883
+      p_Cursor_AirStrike     : Pointer;
+      p_Cursor_TooFar        : Pointer;
+      p_Cursor_Capture       : Pointer;
+      p_Cursor_Defend        : Pointer;
+      p_Cursor_Repair        : Pointer;
+      p_Cursor_Patrol        : Pointer;
+      p_Cursor_Pickup        : Pointer;
+      p_Cursor_Teleport      : Pointer;
+      p_Cursor_Revive        : Pointer;
+      p_Cursor_Reclaim       : Pointer;
+      p_Cursor_Load          : Pointer;
+      p_Cursor_Unload        : Pointer;
+      p_Cursor_Move          : Pointer;
+      p_Cursor_Select        : Pointer;
+      p_Cursor_FindSite      : Pointer;
+      p_Cursor_Red           : Pointer;
+      p_Cursor_Green         : Pointer;
+      p_Cursor_Normal        : Pointer;
+      p_Cursor_Hourglass     : Pointer;
+      p_Cursor_PathIcon      : Pointer; //0x148D3
+      p_LogosGaf             : Pointer;
+      p_GafSequence_32xlogos : Pointer;
+      Unknown36              : array [0..59] of Byte;
+      lNumExplosions         : Cardinal; //0x1491B
+      Explosions             : array [1..300] of TExplosion; //0x1491F
+      pUnknown36             : Pointer; //0x1AB8F
+      Unknown37              : array [0..102011] of Byte;
+      lGUITextSound          : Cardinal; //0x33A0F
+      lGUISounds             : Cardinal; //0x33A13
+      Unknown38              : array [0..1019] of Byte;
+      lGUITextMap            : Cardinal; //0x33E13 - pointer to an array of strings (0x20 each)
+      Unknown39              : array [0..16379] of Byte;
+      pSoundClassAry         : Pointer; //0x37E13
+      lSoundClassNumber      : Cardinal; //0x37E17
+      ScreenOFFSCREEN        : Pointer;
+      ScreenWidth            : Integer;
+      ScreenHeight           : Integer;
+      GameUI_Rect            : tagRECT;
+      lInGamePos_X           : Cardinal; //0x37E37
+      lInGamePos_Y           : Cardinal;
+      ViewResBar             : TViewResBar;
+      Active_BottomState     : array [0..47] of Byte;
+      PopadBoxOffset         : Cardinal;
+      LIGHTBAR               : Pointer;
+      field_37E98            : Pointer;
+      ShowRangeUnitIndex     : Word;
+      field_37E9E            : Word;
+      CurtUnitGUIName        : array [0..29] of AnsiChar;
+      DesktopGUIState        : Byte;
+      RaceGenGUIState        : Byte;
+      field_37EC0            : Word;
+      field_37EC2            : Word;
+      field_37EC4            : Cardinal;
+      field_37EC8            : Cardinal;
+      field_37ECC            : Cardinal;
+      field_37ED0            : Cardinal;
+      field_37ED4            : Cardinal;
+      WindDirection          : array [0..13] of byte;
+      nPerMissionUnitLimit   : Word; //0x37EE6
+      nUnknown42             : Word;
+      nActualUnitLimit       : Word;
+      nMaxUnitLimitPerPlayer : Word;
+      lCurrentAIProfile      : Cardinal; //0x37EEE - xpoy's gives this as "Difficulty"
+      lSide                  : Cardinal; //0x37EF2
+      bAlterKills            : Cardinal;
+      lInterfaceType         : Cardinal;
+      lUnknown44             : Cardinal;
+      lSingleLOSType         : Cardinal;
+      GameOptionMask         : Byte; //0x37F06
+      damagebarsvalue        : Byte;
+      Gamma                  : Cardinal;
+      lFXVol                 : Cardinal; //0x37F0C
+      lMusicVol              : Cardinal;
+      nMusicMode             : Word;
+      cCDMode                : Byte; //0x37F16
+      cUnitChat              : Byte;
+      cUnitChatText          : Byte;
+      nackNBuildNSpeech_Fx   : Word; //0x37F19 - xpoy's gives as "SoundMode"
+      lDisplayModeWidth      : Cardinal;
+      lDisplayModeHeight     : Cardinal;
+      lTextScroll            : Cardinal; //0x37F23
+      lTextLines             : Cardinal;
+      lMouseSpeed            : Cardinal;
+      nSwitchesMask          : Word;
+      Unknown46              : array [0..11] of Byte;
+      RaceSideData           : array [0..4] of TRaceSideData;
+      RandNum_               : Cardinal;
+      field_38A3B            : Cardinal;
+      scrollLen_buf          : Cardinal;
+      field_38A43            : Cardinal;
+      lGameTime              : Integer; //0x38A47
+      nTAGameSpeed           : Word; //0x38A4B
+      nTAGameSpeed_Init      : Word;
+      field_38A4F            : Word;
+      cIsGamePaused          : Byte; //0x38A51
+      field_38A52            : Byte;
+      Image_Output_Dir       : array [0..255] of Byte;
+      Movie_Shot_Output_Dir  : array [0..255] of Byte;
+      field_38C53            : Cardinal;
+      lMovieOutputRate       : Cardinal; //0x38C57
+      lMovieNextFrameTick    : Cardinal;
+      field_38C5F            : Cardinal;
+      Movie                  : Cardinal;
+      field_38C67            : array [0..259] of Byte;
+      field_38D6B            : Cardinal;
+      bLoadProgTextures      : Byte;
+      bLoadProgTerrain       : Byte;
+      bLoadProgUnits         : Byte;
+      bLoadProgAnims         : Byte;
+      bLoadProg3DData        : Word;
+      nPlayersSynchMask      : Word;
+      SfxVectorArray_ptr     : Pointer;
+      SmackMovie_ptr         : Pointer;
+      field_38D7F            : Word;
+      lMaxPlayers            : Cardinal; //0x38D81 - xon's gives as "NumSkirmishPlayers"
+      CurrenttTick           : Cardinal;
+      field_38D89            : Cardinal;
+      ProfileAry             : array[0..31] of Byte;
+      field_38DAD            : Cardinal;
+      field_38DB1            : Cardinal;
+      field_38DB5            : array[0..31] of Byte;
+      IsDrawProfile_b        : Cardinal;
+      field_38DD9            : array[0..637] of Byte;
+      field_39057            : Cardinal;
+      field_3905B            : Cardinal;
+      field_3905F            : Cardinal;
+      field_39063            : Cardinal;
+      field_39067            : Cardinal;
+      field_3906B            : Cardinal;
+      field_3906F            : Cardinal;
+      field_39073            : Cardinal;
+      field_39077            : Cardinal;
+      field_3907B            : Cardinal;
+      Palette                : Pointer;
+      currentPalette         : Pointer;
+      desiredPalette         : Pointer;
+      FadeTable              : Pointer;
+      field_3908F            : Byte;
+      field_39090            : array[0..282] of Byte;
+      field_391AB            : Cardinal;
+      field_391AF            : Cardinal;
+      UnitStateProbeUnitEnab : Cardinal;
+      UnitStateProbeUnitID   : Word;
+      BuilderProbeEnab       : Cardinal;
+      BuilderProbeUnitID     : Word;
+      Showranges             : Cardinal;
+      bps                    : Cardinal;
+      field_391C7            : Cardinal;
+      field_391CB            : Cardinal;
+      field_391CF            : array[0..25] of Byte;
+      p_MapOTAFile           : PMapOTAFile; //0x391E9
+      Unknown52              : array [0..3] of Byte; //0x391ED - there's references to [p_TAMemory + 0x391ED] in ta.exe, so this is definitely something
+      lGUICallbackState      : Cardinal; //0x391F1
+      lGUICallback           : Cardinal; //0x391F5
+      p_Font_COMIX           : Pointer;
+      p_Font_SMLFONT         : Pointer;
+      Unknown53              : array [0..23] of Byte;
+      lSingleCommanderDeath  : Cardinal; //0x39219
+      lSingleMapping         : Cardinal;
+      lSingleLOS             : Cardinal;
+      lSingleLOSTypeOptions  : Cardinal;
+      lMultiCommanderDeath   : Cardinal; //0x39229
+      lMultiMapping          : Cardinal;
+      lMultiLOS              : Cardinal;
+      lMultiLOSTypeOptions   : Cardinal; //0x39235
+      Unknown54              : array [0..1] of Byte;
+      nGameState             : Word; //0x3923B
+      Unknown55              : array [0..3522] of Byte;
+    // --- ProTA 16-player array -------------------------------------
+    // Unknown55 above ends at exactly 0x3A000, which is where ProTA put
+    // its real player array. Verified from TA_16P.exe:
+    //   SetPlayerStructMem @0x00401070 -> TAMain + idx*0x14B + 0x3A000
+    //   init loop @0x00464950 -> stride 0x14B, bound 0x14B0 = 16 players
+    // The old 'Players' array at 0x1B63 is referenced 0 times in ProTA.
+    PlayersExt             : array [0..15] of TPlayerStruct; //0x3A000..0x3B4B0
+ //to get size to 0x3A000 (what xpoy's IDA db says the size of this struct is
+    end;
 
 type
   PUnitSearchUnitsArray = ^TUnitSearchUnitsArray;
@@ -1485,8 +1504,10 @@ type
     DefaultMissionPosZ   : Word;
     ShieldedBy           : PUnitStruct;
     ShieldRange          : Integer;
+    CloakFieldArmrad     : PUnitStruct; // which ARMRAD is currently cloaking this unit (nil = none)
     ForcedYPos           : Boolean;
     ForcedYPosVal        : Integer;
+    ResurrectScanCooldown : Integer; // Portal_AutoResurrectScan throttle (UnitActions.pas)
     { GUI }
     CustomWeapReloadMax  : Integer;
     CustomWeapReloadCur  : Integer;

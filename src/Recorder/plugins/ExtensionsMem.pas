@@ -95,22 +95,24 @@ asm
 end;
 
 procedure InitExtensionsArrays; stdcall;
-var
-  i: Word;
-  UnitRec: TStoreUnitsRec;
 begin
   ExtensionsFreeMemory;
   UnitsCustomFieldsDynArr.Init(TypeInfo(TUnitsCustomFields), UnitsCustomFields, @UnitsCustomFieldsCount);
   UnitsCustomFieldsDynArr.Capacity := 1 + (IniSettings.UnitLimit * MAXPLAYERCOUNT);
+
   UnitSearchResults.Init(TypeInfo(TUnitSearchArr), UnitSearchArr, @UnitSearchCount);
-  UnitSearchResults.Capacity := High(Word);
   SpawnedMinions.Init(TypeInfo(TSpawnedMinionsArr), SpawnedMinionsArr, @SpawnedMinionsCount);
-  SpawnedMinions.Capacity := High(Word);
-  for i := 0 to High(Word) - 1 do
-  begin
-    UnitSearchResults.Add(UnitRec);
-    SpawnedMinions.Add(UnitRec);
-  end;
+
+  // Pre-allocate via SetLength rather than 65535x TDynArray.Add(UnitRec).
+  // TDynArray.Add goes through RTTI-based RecordCopy for TStoreUnitsRec
+  // (which contains a managed 'array of LongWord' field), which requires
+  // more stack than TA's worker threads provide → SIGSEGV.
+  // SetLength from 0→N zero-inits by FillChar with no per-element RTTI
+  // callbacks; nil dynamic array fields are correctly represented as zero.
+  SetLength(UnitSearchArr, High(Word));
+  UnitSearchCount := High(Word);
+  SetLength(SpawnedMinionsArr, High(Word));
+  SpawnedMinionsCount := High(Word);
 end;
 
 procedure InitExtensionsMemory;
@@ -154,18 +156,26 @@ procedure LoadFonts; stdcall;
 var
   Buffer: String[255];
   tmp: Pointer;
+  MainStructPtr: PTADynMemStruct;
 begin
+  // Read the MainStruct pointer directly from the known TA memory address,
+  // bypassing TAData.MainStruct class property (which causes SIGSEGV in FPC
+  // at this early hook point due to class method dispatch issues).
+  MainStructPtr := PTADynMemStruct(PCardinal(TAdynmemStructPtr)^);
+  if MainStructPtr = nil then
+    Exit;
+
   GetLocalizedFilePath(@Buffer[1], PAnsiChar('fonts'), PAnsiChar('COMIX'), PAnsiChar('FNT'));
   tmp := HAPIFILE_ReadFile(PAnsiChar(@Buffer[1]), 0);
   if tmp = nil then
     TerminateProcess_WithWarning(PAnsiChar(PAnsiChar(@Buffer[1])));
-  TAData.MainStruct.p_Font_COMIX := tmp;
+  MainStructPtr.p_Font_COMIX := tmp;
 
   GetLocalizedFilePath(@Buffer[1], PAnsiChar('fonts'), PAnsiChar('smlfont'), PAnsiChar('FNT'));
   tmp := HAPIFILE_ReadFile(PAnsiChar(@Buffer[1]), 0);
   if tmp = nil then
     TerminateProcess_WithWarning(PAnsiChar(PAnsiChar(@Buffer[1])));
-  TAData.MainStruct.p_Font_SMLFONT := tmp;
+  MainStructPtr.p_Font_SMLFONT := tmp;
 {
   GetLocalizedFilePath(@Buffer[1], PAnsiChar('fonts'), PAnsiChar('Armbrief'), PAnsiChar('FNT'));
   Fonts.p_ArmBrief := HAPIFILE_ReadFile(PAnsiChar(@Buffer[1]), 0);

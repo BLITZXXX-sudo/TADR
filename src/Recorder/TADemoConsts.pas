@@ -5,11 +5,14 @@ uses
   windows,
   gphugef;
 const
-//  TADemoVersionStr = '0.99ß3.3.%s';
+
+  // If FILE_FILE_COMPRESSION is not found, define it using the known value
+  FILE_FILE_COMPRESSION = $00000010;
+//  TADemoVersionStr = '0.99ï¿½3.3.%s';
 
   UNITSPACE = 5000;
 
-  // 0 = ingen/jättegammal 1 = 97, 2 = 98/99.b1, 3 = 99b2, 4 = 99.b3.x
+  // 0 = ingen/jï¿½ttegammal 1 = 97, 2 = 98/99.b1, 3 = 99b2, 4 = 99.b3.x
   TADemoVersion_OTA = 0;
   TADemoVersion_97   = 1;
   TADemoVersion_98b1 = 2;

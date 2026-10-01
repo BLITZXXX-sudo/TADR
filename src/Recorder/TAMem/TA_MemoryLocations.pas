@@ -33,8 +33,8 @@ type
     class function GetMainStructPtr: PTADynMemStruct;
     class function GetProgramStructPtr: Pointer;
     class function GetPlayersStructPtr: Pointer;
-    class function GetModelsArrayPtr: Pointer;
-    class function GetWeaponTypeDefArrayPtr: Pointer;
+//    class function GetModelsArrayPtr: Pointer;
+    //class function GetWeaponTypeDefArrayPtr: Pointer;
     class function GetFeatureTypeDefArrayPtr: Pointer;
     class function GetFeatureAnimArrayPtr: Pointer;
     class function GetUnitInfosPtr: Pointer;
@@ -74,8 +74,8 @@ type
     Property MainStruct: PTADynMemStruct read GetMainStructPtr;
     Property ProgramStructPtr: Pointer read GetProgramStructPtr;
     Property PlayersStructPtr: Pointer read GetPlayersStructPtr;
-    Property ModelsArrayPtr: Pointer read GetModelsArrayPtr;
-    Property WeaponTypeDefArrayPtr: Pointer read GetWeaponTypeDefArrayPtr;
+  //  Property ModelsArrayPtr: Pointer read GetModelsArrayPtr;
+   // Property WeaponTypeDefArrayPtr: Pointer read GetWeaponTypeDefArrayPtr;
     Property FeatureTypeDefArrayPtr: Pointer read GetFeatureTypeDefArrayPtr;
     Property FeatureAnimArrayPtr: Pointer read GetFeatureAnimArrayPtr;
     Property UnitInfosPtr: Pointer read GetUnitInfosPtr;
@@ -93,7 +93,7 @@ type
     class function RaceSideId2Data(Id: Byte): PRaceSideData;
     class function ScriptActionName2Index(ActionName: String): Byte;
     class function ScriptActionIndex2Handler(ActionIndex: Byte): PActionHandler;
-    class function GetModelPtr(index: Word): Pointer;
+    //class function GetModelPtr(index: Word): Pointer;
     class function UnitInfoId2Ptr(ID: Word): PUnitInfo;
     class function UnitInfoCrc2Ptr(CRC: Integer): PUnitInfo;
     class function MovementClassId2Ptr(index: Word): Pointer;
@@ -123,6 +123,11 @@ type
   public
     class function WeaponId2Ptr(ID: Cardinal): PWeaponDef;
     class function GetWeaponID(WeaponPtr: PWeaponDef): Cardinal;
+    // TODO: FireMap_Weapon is unimplemented. The real underlying function
+    // (PROJECTILES_FireMapWeap, TA_FunctionsU.pas) needs full TPosition
+    // start/target structs + a broadcast flag, not (TargetX, TargetZ: Cardinal).
+    // Needs a real Y/height lookup and start-position decision before this
+    // can safely call into game memory -- left unimplemented rather than guessed.
     class function FireMap_Weapon(WeaponPtr: PWeaponDef;
       TargetX, TargetZ: Cardinal): Boolean;
   end;
@@ -138,12 +143,12 @@ function IsTAVersion31: Boolean;
 implementation
 uses
   SysUtils,
-  logging,
+
   Math,
-  IniOptions,
-  idplay,
+  //IniOptions,
+   //idplay,
   WeaponsExpand,
-  TAMemManipulations,
+  //TAMemManipulations,
   TA_MemoryConstants,
   TA_MemPlayers,
   TA_MemUnits,
@@ -151,10 +156,76 @@ uses
 
 // -----------------------------------------------------------------------------
 
+var
+  // Diagnostic (2026-07-22 round 5): ARMARAD shield-ring crash investigation.
+  // See the bounds-check fix in TASfx.PlayGafAnim below. Self-contained
+  // append-mode logger (same pattern as GUIEnhancements.LogDiag) - kept local
+  // to this unit rather than importing GUIEnhancements, to avoid introducing
+  // a circular unit dependency (GUIEnhancements' implementation already uses
+  // TA_MemoryLocations).
+  DiagLoggedExplodeGafOutOfRange: Boolean = False;
+  DiagLoggedCustAnimGafOutOfRange: Boolean = False;
+
+procedure LogDiagOnce(var AOnceFlag: Boolean; const Msg: string);
+var
+  DiagLogFile: TextFile;
+  DiagLogPath: string;
+begin
+  if AOnceFlag then Exit;
+  AOnceFlag := True;
+  try
+    DiagLogPath := ExtractFilePath(ParamStr(0)) + 'tplayx_diag.log';
+    AssignFile(DiagLogFile, DiagLogPath);
+    {$I-}
+    if FileExists(DiagLogPath) then
+      Append(DiagLogFile)
+    else
+      Rewrite(DiagLogFile);
+    {$I+}
+    if IOResult <> 0 then Exit;
+    Writeln(DiagLogFile, FormatDateTime('yyyy-mm-dd hh:nn:ss', Now) + '  ' + Msg +
+      ' (further occurrences this session will not be logged)');
+    CloseFile(DiagLogFile);
+  except end;
+end;
+
+class function TAMem.IsTAVersion31: Boolean;
+begin
+  Result := True;
+end;
+
+
 function IsTAVersion31: Boolean;
 begin
 result := TAMem.IsTAVersion31();
 end; {IsTAVersion31}
+
+// -----------------------------------------------------------------------------
+// TAWeapon
+// -----------------------------------------------------------------------------
+
+class function TAWeapon.WeaponId2Ptr(ID: Cardinal): PWeaponDef;
+begin
+  Result := nil;
+  if ID < MAX_WEAPONS_PATCHED then
+    Result := @WeaponsExpand.WeaponsPatchMainStruct.Weapons[ID];
+end;
+
+class function TAWeapon.GetWeaponID(WeaponPtr: PWeaponDef): Cardinal;
+begin
+  Result := 0;
+  if WeaponPtr = nil then
+    Exit;
+  Result := (Cardinal(WeaponPtr) - Cardinal(@WeaponsExpand.WeaponsPatchMainStruct.Weapons[0]))
+    div SizeOf(TWeaponDef);
+end;
+
+class function TAWeapon.FireMap_Weapon(WeaponPtr: PWeaponDef;
+  TargetX, TargetZ: Cardinal): Boolean;
+begin
+  // TODO: unimplemented -- see TODO note on the class declaration above.
+  Result := False;
+end;
 
 var
   CacheUsed: Boolean;
@@ -163,34 +234,25 @@ var
 // -----------------------------------------------------------------------------
 // TAMem
 // -----------------------------------------------------------------------------
-
-class function TAMem.IsTAVersion31: Boolean;
-const
-  Address = $4ad494;
-  ExpectedData: array [0..2] of Byte = (0,$55,$e8);
+       function TestBytes(Address, Expected: Pointer; Len: Integer; out FailIndex: Integer; out FailValue: Byte): Boolean;
 var
-  FailIndex: Integer;
-  FailValue: Byte;
-  Procedure DoReport;
-  begin
-  Tlog.Add(0, 'At 0x'+IntToHex(Address,8)+' index '+IntToStr(FailIndex)+
-              ' expecting 0x'+IntToHex(ExpectedData[FailIndex],2)+
-              ' but found 0x'+IntToHex(FailValue,2));
-  end;
+  i: Integer;
+  pAddr, pExp: PByte;
 begin
-if not CacheUsed then
+  pAddr := Address;
+  pExp := Expected;
+  for i := 0 to Len - 1 do
   begin
-  try
-    IsTAVersion31_Cache := TestBytes(Address, @ExpectedData[0], length(ExpectedData), FailIndex, FailValue );
-    if not IsTAVersion31_Cache then
-      DoReport;
-  except
-    on e: EAccessViolation do
-      IsTAVersion31_Cache := false;
+    if pAddr^ <> pExp^ then
+    begin
+      FailIndex := i;
+      FailValue := pAddr^;
+      Exit(False);
+    end;
+    Inc(pAddr);
+    Inc(pExp);
   end;
-  CacheUsed := true;
-  end;
-result := IsTAVersion31_Cache;
+  Result := True;
 end;
 
 Class function TAMem.GetShareEnergyVal: Single;
@@ -205,12 +267,12 @@ end;
 
 Class function TAMem.GetShareEnergy: Boolean;
 begin
-  Result := PlayerState_ShareEnergy in TAData.MainStruct.Players[TAData.LocalPlayerID].PlayerInfo.SharedBits;
+  Result := PlayerState_ShareEnergy in TAData.MainStruct.PlayersExt[TAData.LocalPlayerID].PlayerInfo.SharedBits;
 end;
 
 Class function TAMem.GetShareMetal: Boolean;
 begin
-  Result := PlayerState_ShareMetal in TAData.MainStruct.Players[TAData.LocalPlayerID].PlayerInfo.SharedBits;
+  Result := PlayerState_ShareMetal in TAData.MainStruct.PlayersExt[TAData.LocalPlayerID].PlayerInfo.SharedBits;
 end;
 
 Class function TAMem.GetShootAll: Boolean;
@@ -259,7 +321,7 @@ end;
 
 class function TAMem.GetIsNetworkLayerEnabled: Boolean;
 begin
-  Result := (GlobalDPlay <> nil) and ((TAData.MainStruct.cNetworkLayerEnabled and 1) = 1);
+  //Result := (GlobalDPlay <> nil) and ((TAData.MainStruct.cNetworkLayerEnabled and 1) = 1);
 end;
 
 class function TAMem.GetMaxUnitLimit: Word;
@@ -299,20 +361,7 @@ end;
 
 class function TAMem.GetPlayersStructPtr: Pointer;
 begin
-  Result := @TAData.MainStruct.Players[0];
-end;
-
-class function TAMem.GetModelsArrayPtr: Pointer;
-begin
-  Result := TAData.MainStruct.p_MODEL_PTRS;
-end;
-
-class function TAMem.GetWeaponTypeDefArrayPtr: Pointer;
-begin
-  if p_WeaponsPatchMainStruct <> nil then
-    Result := @WeaponsPatchMainStruct.Weapons[0]
-  else
-    Result := @TAData.MainStruct.Weapons[0];
+  Result := @TAData.MainStruct.PlayersExt[0];
 end;
 
 class function TAMem.GetFeatureTypeDefArrayPtr: Pointer;
@@ -360,10 +409,6 @@ begin
   TAData.MainStruct.cIsGamePaused := BoolValues[value];
 end;
 
-class function TAMem.GetModelPtr(index: Word): Pointer;
-begin
-  Result := PLongWord(Cardinal(GetModelsArrayPtr) + index * 4);
-end;
 
 class function TAMem.UnitInfoId2Ptr(ID: Word): PUnitInfo;
 begin
@@ -522,10 +567,22 @@ begin
   Result := TAIDifficulty(TAData.MainStruct.lCurrenTAIProfile);
 end;
 
+
 class function TAMem.GetControlPlayerRaceSide: Byte;
+var
+  LocalID: Byte;
 begin
-  Result := PPlayerInfoStruct(PPlayerStruct(TAPlayer.GetPlayerByIndex(TAData.LocalPlayerID)).PlayerInfo).Raceside;
+  Result := 0; // Safe default
+  LocalID := TAData.LocalPlayerID;
+
+  // Directly bounds-check the array index against MAXPLAYERCOUNT safely
+  if (LocalID < 10) then
+  begin
+    Result := TAData.MainStruct.PlayersExt[LocalID].PlayerInfo.Raceside;
+  end;
 end;
+
+
 
 class procedure TAMem.ShakeCam(X, Y, Duration: Cardinal);
 begin
@@ -589,13 +646,37 @@ begin
         5: ShowExplodeGaf(@Position, TAData.MainStruct.nuke1, GlowInt, SmokeInt); //nuke1
     6..99 :
       begin
-        if Length(ExtraGAFAnimations.Explode) > 0 then
-          ShowExplodeGaf(@Position, ExtraGAFAnimations.Explode[BmpType - 6], GlowInt, SmokeInt);
+        // Bounds fix (2026-07-22): this only checked the array was non-empty,
+        // not that (BmpType-6) was actually a valid index into it. Any COB
+        // script anywhere in the mod calling PLAY_GAF_ANIM with a BmpType
+        // that doesn't correspond to a real ExplodeN entry in this install's
+        // customfx.gaf silently indexed a dynamic array out of range (no
+        // range checking in a release build) - the resulting garbage pointer
+        // gets passed straight into the native GAF blit, which is exactly
+        // the "illegal write to a wild address" access-violation shape seen
+        // in ErrorLog.txt right after custom GAF anims started actually
+        // loading for the first time (ARMARAD shield-ring investigation).
+        if (BmpType - 6 >= 0) and (BmpType - 6 <= High(ExtraGAFAnimations.Explode)) then
+          ShowExplodeGaf(@Position, ExtraGAFAnimations.Explode[BmpType - 6], GlowInt, SmokeInt)
+        else
+          LogDiagOnce(DiagLoggedExplodeGafOutOfRange,
+            Format('PlayGafAnim: BmpType=%d (Explode index %d) out of range, High(Explode)=%d - skipped instead of indexing out of bounds',
+              [BmpType, BmpType - 6, High(ExtraGAFAnimations.Explode)]));
       end;
  100..199 :
       begin
-        if Length(ExtraGAFAnimations.CustAnim) > 0 then
-          ShowExplodeGaf(@Position, ExtraGAFAnimations.CustAnim[BmpType - 100], GlowInt, SmokeInt);
+        // Same bounds fix as above, for the CustAnim range. ARMARAD's own
+        // Go()/Stop() only ever use 100-103 (CustAnim1-4), which are in
+        // range for a 5-entry customfx.gaf, but any OTHER unit's COB script
+        // in this mod calling PLAY_GAF_ANIM(105+, ...) against a customfx.gaf
+        // that doesn't have that many CustAnimN entries would hit exactly
+        // this same out-of-bounds write.
+        if (BmpType - 100 >= 0) and (BmpType - 100 <= High(ExtraGAFAnimations.CustAnim)) then
+          ShowExplodeGaf(@Position, ExtraGAFAnimations.CustAnim[BmpType - 100], GlowInt, SmokeInt)
+        else
+          LogDiagOnce(DiagLoggedCustAnimGafOutOfRange,
+            Format('PlayGafAnim: BmpType=%d (CustAnim index %d) out of range, High(CustAnim)=%d - skipped instead of indexing out of bounds',
+              [BmpType, BmpType - 100, High(ExtraGAFAnimations.CustAnim)]));
       end;
   end;
 end;
@@ -627,11 +708,11 @@ begin
     8: Result := EmitSfx_Teleport(@PiecePos, @TargetBase, 30, 5);
   end;
 
-  if IniSettings.BroadcastNanolathe then
-  begin
-    if Broadcast and TAData.NetworkLayerEnabled then
-      GlobalDPlay.Broadcast_EmitSFXToUnit(TAUnit.GetID(p_Unit), TAUnit.GetID(Targetp_Unit), PieceIdx, SfxType);
-  end;
+  //if IniSettings.BroadcastNanolathe then
+ // begin
+   // if Broadcast and TAData.NetworkLayerEnabled then
+     // GlobalDPlay.Broadcast_EmitSFXToUnit(TAUnit.GetID(p_Unit), TAUnit.GetID(Targetp_Unit), PieceIdx, SfxType);
+  //end;
 end;
 
 class function TASfx.NanoParticles(StartPos: TPosition; TargetPos: TNanolathePos): Cardinal;
@@ -645,35 +726,10 @@ begin
   Result := EmitSfx_NanoParticlesReverse(@TargetPos, @StartPos, 6);
 end;
 
-{ TAWeapon }
-
-class function TAWeapon.GetWeaponID(WeaponPtr: PWeaponDef): Cardinal;
-begin
-  if p_WeaponsPatchMainStruct <> nil then
-    Result := WeaponPtr.lWeaponIDCrack
-  else
-    Result := WeaponPtr.ucID;
-end;
-
-class function TAWeapon.WeaponId2Ptr(ID: Cardinal): PWeaponDef;
-begin
-  Result := Pointer(Cardinal(TAData.WeaponTypeDefArrayPtr) + SizeOf(TWeaponDef) * ID);
-end;
-
-class function TAWeapon.FireMap_Weapon(WeaponPtr: PWeaponDef;
-  TargetX, TargetZ: Cardinal): Boolean;
-var
-  StartPos, TargetPos: TPosition;
-begin
-  TargetPos.X := TargetX;
-  TargetPos.Z := TargetZ;
-
-  StartPos.X := 0;
-  StartPos.Z := 0;
-
-  TargetPos.Y := 1350;
-  StartPos.Y := 65521;
-
-  Result := PROJECTILES_FireMapWeap(WeaponPtr, @TargetPos, @StartPos, True);
-end;
+initialization
+  // In Delphi, calling class methods through a nil class variable works because
+  // class method dispatch goes through the VMT of the class type, not the instance.
+  // FPC however dereferences the class variable to find the VMT, so a nil TAData
+  // crashes every TAData.Xxx call. Assigning a real instance fixes all of these.
+  TAData := TAMem.Create;
 end.

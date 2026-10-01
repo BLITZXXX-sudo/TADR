@@ -122,6 +122,8 @@ SendChat('TA demo recorder ' + GetTADemoVersion);
 SendChat('Written by SY_SJ and SY_Fnordia');
 SendChat('Updated by Xon, Xpoy and Rime');
 SendChat('Visit http://www.tauniverse.com for more info');
+SendChat(TA16P_CREDIT);
+SendChat('TPLAYX build: ' + TA16P_BUILD_ID);
 end;
 
 function TDPlay.OnFixall( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;

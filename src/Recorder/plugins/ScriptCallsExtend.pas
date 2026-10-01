@@ -62,7 +62,7 @@ asm
   and     edx, 3
   push    eax
   mov     dword ptr [esi-13h], 0
-  mov     eax, $509688[edx*4]    // AimPrimary / AimSecondary / AimTertiary
+  mov     eax, [$509688+edx*4]    // AimPrimary / AimSecondary / AimTertiary
   push    3                      // par count
   lea     ecx, [esi-17h]
   push    0
@@ -96,7 +96,7 @@ ContinueToGame:
   and     eax, 3
   push    0
   mov     dword ptr [esi-13h], 0
-  mov     edx, $509688[eax*4]
+  mov     edx, [$509688+eax*4]
   push    3
   push $0049E379;
   call PatchNJump;

@@ -10,6 +10,7 @@ type
     FileName : string;
     filehandle : TGpHugeFile;
     HasFlushed : boolean;
+    Broken : boolean;   // 16P safety: set on first I/O error, then logging stops
   public
     crc :longword;
     docrc :boolean;
@@ -49,10 +50,19 @@ end;
 
 procedure TLog2.Flush();
 begin
+if Broken or (filehandle = nil) then exit;
 if not HasFlushed then
   begin
   HasFlushed := true;
-  filehandle.Flush;
+  try
+    filehandle.Flush;
+  except
+    on E: Exception do
+      begin
+      Broken := true;
+      try TLog.Add(0, 'TLog2.Flush failed, demo recording stopped: ' + E.Message); except end;
+      end;
+  end;
   end;
 end; {Flush}
 
@@ -65,8 +75,18 @@ assert( filehandle <> nil );
 len := Length(text);
 if len > 0 then
   begin
+  if Broken then exit;
   HasFlushed := false;
-  filehandle.BlockWriteUnsafe( text[1], len );
+  try
+    filehandle.BlockWriteUnsafe( text[1], len );
+  except
+    on E: Exception do
+      begin
+      Broken := true;
+      try TLog.Add(0, 'TLog2.Add failed, demo recording stopped: ' + E.Message); except end;
+      exit;
+      end;
+  end;
   if docrc then
     crc := CalcCRC(crc, @text[1], len);
   end
@@ -92,8 +112,18 @@ assert( filehandle <> nil );
 len := Length(data);
 if len > 0 then
   begin
+  if Broken then exit;
   HasFlushed := false;
-  filehandle.BlockWriteUnsafe( data[0], len );
+  try
+    filehandle.BlockWriteUnsafe( data[0], len );
+  except
+    on E: Exception do
+      begin
+      Broken := true;
+      try TLog.Add(0, 'TLog2.Add failed, demo recording stopped: ' + E.Message); except end;
+      exit;
+      end;
+  end;
   if docrc then
     crc := CalcCRC( crc, @data[0], len);
   end

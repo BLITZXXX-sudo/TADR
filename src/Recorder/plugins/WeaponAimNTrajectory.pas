@@ -35,7 +35,7 @@ begin
   if WeaponPtr <> nil then
   begin
     WeapID := TAWeapon.GetWeaponID(WeaponPtr);
-    if High(ExtraWeaponDefTags) >= WeapID then
+    if (WeapID >= 0) and (WeapID <= High(ExtraWeaponDefTags)) then
     begin
       case PropertyType of
         1 : if ExtraWeaponDefTags[WeapID].HighTrajectory then Result := 1;
@@ -260,7 +260,7 @@ var
   CurProjectileIdx : Integer;
   ProjectilesCount : Integer;
   InterceptorCount : Integer;
-  CurInterceptor : Pointer;
+  CurInterceptor : PWeaponProjectile;
   Projectile, FirstProjectile : PWeaponProjectile;
   Coverage : Integer;
   WeapIdx : Cardinal;
@@ -278,9 +278,9 @@ begin
   if ( UnitStruct.UnitWeapons[WeapStructIndex].cStock <> 0 ) and
      ( ProjectilesCount > 0 ) then
   begin
-    while ( True ) do
+    while ( CurProjectileIdx < ProjectilesCount ) do
     begin
-      if ( Projectile.cOwnerID <> UnitStruct.ucOwnerID ) then
+      if ( Projectile <> nil ) and (Projectile.cOwnerID <> UnitStruct.ucOwnerID ) then
         if ( (Projectile.p_Weapon.lWeaponTypeMask shr 29) and 1 = 1 ) then
         begin
           if TAMem.DistanceBetweenPosCompare(@UnitStruct.Position, @Projectile.Position_Target, Coverage) then
@@ -288,7 +288,18 @@ begin
             // if tag is empty = intercept all
             bAllowShoot := True;
             WeapIdx := TAWeapon.GetWeaponID(UnitStruct.UnitWeapons[WeapStructIndex].p_Weapon);
-            if ExtraWeaponDefTags[WeapIdx].Intercepts <> nil then
+            // Bounds fix (2026-10-01): GetWeaponID can return an id that is not
+            // a valid index into ExtraWeaponDefTags, and a release build has no
+            // range checking, so the read below became
+            // [base + WeapIdx*SizeOf(rec) + $4D] on a garbage index and faulted:
+            // access violation at TPLAYX.dll+$3A04E during AI weapon targeting,
+            // reached through the hooked call at $00408B48. Out of range means
+            // "no intercept list for this weapon", i.e. intercept all - which is
+            // the same meaning the nil check already carries. Guard matches the
+            // one GetWeaponExtProperty above already uses.
+            if (Integer(WeapIdx) >= 0) and
+               (Integer(WeapIdx) <= High(ExtraWeaponDefTags)) and
+               (ExtraWeaponDefTags[WeapIdx].Intercepts <> nil) then
             begin
               bAllowShoot := False;
               for i := 0 to ExtraWeaponDefTags[WeapIdx].Intercepts.Count - 1 do
@@ -305,13 +316,14 @@ begin
               InterceptorCount := 0;
               if ( ProjectilesCount > 0 ) then
               begin
-                CurInterceptor := @FirstProjectile.lInterceptor;
-                repeat
-                  if ( Pointer(CurInterceptor^) = Projectile ) then
+                CurInterceptor := FirstProjectile;
+                while ( InterceptorCount < ProjectilesCount ) do
+                begin
+                  if ( CurInterceptor <> nil ) and (CurInterceptor = Projectile) then
                     Break;
                   Inc(InterceptorCount);
                   CurInterceptor := Pointer(Cardinal(CurInterceptor) + SizeOf(TWeaponProjectile));
-                until ( InterceptorCount >= ProjectilesCount );
+                end;
               end;
               if ( InterceptorCount = ProjectilesCount ) then
                 Break;
@@ -320,8 +332,6 @@ begin
         end;
       Inc(CurProjectileIdx);
       Projectile := Pointer(Cardinal(Projectile) + SizeOf(TWeaponProjectile));
-      if ( CurProjectileIdx >= ProjectilesCount ) then
-        goto AntiNukeNotInStock;
     end;
   end else
   begin

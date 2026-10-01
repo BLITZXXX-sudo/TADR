@@ -194,6 +194,21 @@ var
   SpawnedMinions: TDynArray;
   UnitSearchCount,
   SpawnedMinionsCount: Integer;
+  // Diagnostic (2026-07-22): tracing whether the CUSTOM_BAR_PROGRESS COB
+  // extension is actually being invoked at all - see the ARMARAD shield
+  // power bar/range investigation. One-shot flag, own diag log entry, does
+  // not affect behaviour.
+  DiagLoggedCustomBarProgress: Boolean = False;
+  // Diagnostic (2026-07-22): logs each DISTINCT extension index the FIRST
+  // time it's seen going through CustomGetters, so we can see the actual
+  // "vocabulary" of get-extensions ARMARAD's compiled script calls at
+  // runtime - in particular whether index 117 (CUSTOM_BAR_PROGRESS) is
+  // ever attempted at all, and what index values surround it.
+  DiagSeenExtIndex: array[0..500] of Boolean;
+  // Diagnostic (2026-07-22 round 4): see comment at the UNIT_ALLIED_WITH_LOCAL
+  // case in CustomGetters - ARMARAD shield-radius-circle / shield-ring GAF
+  // investigation.
+  DiagLoggedUnitAlliedWithLocal: Boolean = False;
 
 // -----------------------------------------------------------------------------
 
@@ -202,6 +217,7 @@ Procedure COB_ExtensionsSetters_Handling;
 
 implementation
 uses
+  SysUtils,
   idplay,
   Windows,
   TA_MemoryLocations,
@@ -210,7 +226,8 @@ uses
   TA_MemPlotData,
   TA_FunctionsU,
   MapExtensions,
-  IniOptions;
+  IniOptions,
+  GUIEnhancements;
 
 Procedure OnInstallCobExtensions;
 begin
@@ -255,16 +272,30 @@ var
   i: Integer;
   ExtensionsNotForDemos: Boolean;
   UnitID: Word;
+  p_ArgPlayer: PPlayerStruct;
   {$IFDEF DEBUG}
   ErrorAddress, ErrorAddress2: Cardinal;
   s: String;
   {$ENDIF}
 begin
   Result := 0;
+  // Diagnostic (2026-07-22): one log line the first time each distinct
+  // extension index passes through here - see ARMARAD shield power bar
+  // investigation (is CUSTOM_BAR_PROGRESS=117 ever actually called?).
+  if (index <= High(DiagSeenExtIndex)) and not DiagSeenExtIndex[index] then
+  begin
+    DiagSeenExtIndex[index] := True;
+    if p_Unit <> nil then
+      LogDiag(Format('CustomGetters: extension index=%d first seen, UnitID=%d arg1=%d arg2=%d',
+        [index, TAUnit.GetId(p_Unit), arg1, arg2]))
+    else
+      LogDiag(Format('CustomGetters: extension index=%d first seen, p_Unit=nil arg1=%d arg2=%d',
+        [index, arg1, arg2]));
+  end;
 {$IFDEF DEBUG}
 try
 {$ENDIF}
-  if TAData.NetworkLayerEnabled then
+  if TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
     ExtensionsNotForDemos := GlobalDPlay.NotViewingRecording
   else
     ExtensionsNotForDemos := True;
@@ -320,6 +351,25 @@ try
         begin
         result := BoolValues[TAPlayer.GetAlliedState(TAUnit.GetOwnerPtr(TAUnit.Id2Ptr(arg1)),
           TAData.LocalPlayerID)];
+        // Diagnostic (2026-07-22 round 4): ARMARAD's Go() gates every single
+        // PLAY_GAF_ANIM call (custanim1-4, including the shield-ring
+        // CustAnim2) behind bOwnedByAlly = get UNIT_ALLIED_WITH_LOCAL(get
+        // MY_ID). If GetAlliedState doesn't treat a player as allied with
+        // themselves (self bit not set in cAllyFlagArray), this would
+        // silently return 0 for the player's OWN units and skip every custom
+        // GAF anim - a second, independent reason the shield ring might never
+        // show up, on top of the missing anims\customfx.gaf file. Logs once
+        // with the actual arg/result so we can tell without guessing.
+        if not DiagLoggedUnitAlliedWithLocal then
+        begin
+          DiagLoggedUnitAlliedWithLocal := True;
+          if p_Unit <> nil then
+            LogDiag(Format('UNIT_ALLIED_WITH_LOCAL: called with arg1(queriedUnitId)=%d by scriptUnitId=%d, result=%d, LocalPlayerID=%d',
+              [arg1, TAUnit.GetId(p_Unit), result, TAData.LocalPlayerID]))
+          else
+            LogDiag(Format('UNIT_ALLIED_WITH_LOCAL: called with arg1(queriedUnitId)=%d by scriptUnit=nil, result=%d, LocalPlayerID=%d',
+              [arg1, result, TAData.LocalPlayerID]));
+        end;
         end;
       UNIT_TYPE_CRC :
         begin
@@ -372,6 +422,7 @@ try
       PLAYER_ACTIVE :
         begin
         result := BoolValues[TAPlayer.IsActive(TAPlayer.GetPlayerByIndex(arg1))];
+
         end;
       PLAYER_TYPE :
         begin
@@ -383,23 +434,30 @@ try
         end;
       PLAYER_KILLS :
         begin
-        result := PPlayerStruct(TAPlayer.GetPlayerByIndex(arg1)).nKills;
+        // arg1 is an unvalidated COB script argument - GetPlayerByIndex
+        // returns nil for out-of-range indices (see TAPlayer.IsActive's
+        // comment for the crash this caused when unchecked). Guard it.
+        p_ArgPlayer := TAPlayer.GetPlayerByIndex(arg1);
+        if p_ArgPlayer <> nil then
+          result := p_ArgPlayer.nKills;
         end;
       PLAYER_ECONOMY :
         begin
-        case arg2 of
-          1 : Result := Round(PPlayerStruct(TAPlayer.GetPlayerByIndex(arg1)).Resources.fCurrentEnergy);
-          2 : Result := Round(PPlayerStruct(TAPlayer.GetPlayerByIndex(arg1)).Resources.fCurrentMetal);
-          3 : Result := Round(PPlayerStruct(TAPlayer.GetPlayerByIndex(arg1)).Resources.fEnergyProduction);
-          4 : Result := Round(PPlayerStruct(TAPlayer.GetPlayerByIndex(arg1)).Resources.fMetalProduction);
-          5 : Result := Round(PPlayerStruct(TAPlayer.GetPlayerByIndex(arg1)).Resources.fEnergyStorageMax);
-          6 : Result := Round(PPlayerStruct(TAPlayer.GetPlayerByIndex(arg1)).Resources.fMetalStorageMax);
-        end;
+        p_ArgPlayer := TAPlayer.GetPlayerByIndex(arg1);
+        if p_ArgPlayer <> nil then
+          case arg2 of
+            1 : Result := Round(p_ArgPlayer.Resources.fCurrentEnergy);
+            2 : Result := Round(p_ArgPlayer.Resources.fCurrentMetal);
+            3 : Result := Round(p_ArgPlayer.Resources.fEnergyProduction);
+            4 : Result := Round(p_ArgPlayer.Resources.fMetalProduction);
+            5 : Result := Round(p_ArgPlayer.Resources.fEnergyStorageMax);
+            6 : Result := Round(p_ArgPlayer.Resources.fMetalStorageMax);
+          end;
         end;
       UNIT_IN_PLAYER_LOS :
         begin
         if arg1 <> 0 then
-          if TAUnit.Id2Ptr(arg1).p_Owner <> nil then
+          if (TAUnit.Id2Ptr(arg1) <> nil) and (TAUnit.Id2Ptr(arg1).p_Owner <> nil) then
             result := UnitInPlayerLOS(TAPlayer.GetPlayerByIndex(TAData.LocalPlayerID), TAUnit.Id2Ptr(arg1));
         end;
       POSITION_IN_PLAYER_LOS :
@@ -408,7 +466,7 @@ try
           result := BoolValues[TAMap.PositionInLOS(TAPlayer.GetPlayerByIndex(arg1), @Position)];
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= UNITX) and (index <= MEX_RATIO) then
   begin
@@ -542,6 +600,12 @@ try
       CUSTOM_BAR_PROGRESS :
         begin
           UnitID := TAUnit.GetId(p_Unit);
+          // Diagnostic: confirms whether a script's compiled .cob is really
+          // reaching this extension at all, and with what values - see
+          // ARMARAD shield power bar investigation (2026-07-22).
+          LogDiagOnce(DiagLoggedCustomBarProgress,
+            Format('CUSTOM_BAR_PROGRESS hit: UnitID=%d arg1(cur)=%d arg2(max)=%d',
+              [UnitID, arg1, arg2]));
           if arg2 <> 0 then
           begin
               UnitsCustomFields[UnitID].CustomWeapReloadCur := arg1;
@@ -557,7 +621,7 @@ try
         result := Trunc(p_Unit.fMetalExtrRatio * 100);
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= WEAPON_PRIMARY) and (index <= WEAPON_BUILD_PROGRESS) then
   begin
@@ -602,7 +666,7 @@ try
           result := p_Unit.UnitWeapons[0].cStock;
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= GIVE_UNIT) and (index <= SWAP_UNIT_TYPE) then
   begin
@@ -643,7 +707,7 @@ try
           result := TAUnits.CreateMinions(p_Unit, arg2, TAMem.UnitInfoCrc2Ptr(arg1), TTAActionType(arg3), arg4);
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= UNITS_NEAR) and (index <= DISTANCE) then
   begin
@@ -703,7 +767,7 @@ try
           result := Cardinal(TAMem.DistanceBetweenPos(@p_Unit.Position, @TAUnit.Id2Ptr(arg1).Position));
         end;
     end;
-    Exit;    
+    Exit;
   end;
 
   if (index >= CURRENT_ORDER_ABORT) and (index <= ADD_BUILD) then
@@ -786,7 +850,7 @@ try
           end;
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= GRANT_UNITINFO) and (index <= MOBILE_PLANT) then
   begin
@@ -804,7 +868,7 @@ try
           if arg3 <> 0 then
             i := -i;
           if TAUnit.setUnitInfoField(p_Unit, TUnitInfoExtensions(arg1), i) then
-            if TAData.NetworkLayerEnabled then
+            if TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
               GlobalDPlay.Broadcast_UnitInfoEdit(TAUnit.GetID(p_Unit), arg1, i);
         end;
       UNIT_TYPE_LIMIT :
@@ -818,7 +882,7 @@ try
           end;
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= UNIT_SPEECH) and (index <= EMIT_SFX) then
   begin
@@ -841,7 +905,7 @@ try
           TAUnit.Id2Ptr(arg3), arg1, arg2, p_Unit.ucOwnerID = TAData.LocalPlayerID) <> 0];
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= COB_QUERY_SCRIPT) and (index <= LOCAL_SHARED_DATA) then
   begin
@@ -864,7 +928,7 @@ try
         Result := UnitsSharedData[arg2];
       end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= MAP_SEA_LEVEL) and (index <= GRID_INFO) then
   begin
@@ -927,7 +991,7 @@ try
         end;
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if (index >= MS_MOVE_CAM_POS) and (index <= MS_AI_DIFFICULTY) then
   begin
@@ -1034,7 +1098,7 @@ try
         Result := Ord(TAData.AIDifficulty);
         end;
     end;
-    Exit;    
+    Exit;
   end;
   if index >= LOWWORD then
   begin
@@ -1171,7 +1235,7 @@ try
           end;
       end;
 
-      if TAData.NetworkLayerEnabled then
+      if TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
         ExtensionsNotForDemos := GlobalDPlay.NotViewingRecording
       else
         ExtensionsNotForDemos := True;
@@ -1222,7 +1286,7 @@ try
           WEAPON_PRIMARY..WEAPON_TERTIARY :
             begin
             if TAUnit.setWeapon(p_Unit, index, arg1) then
-              if TAData.NetworkLayerEnabled then
+              if TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
                 GlobalDPlay.Broadcast_UnitWeapon(TAUnit.GetID(p_Unit), Index, arg1);
             end;
           KILL_THIS_UNIT :

@@ -75,21 +75,25 @@ begin
           TDFIni.LoadFromStream(msTDF);
           if TDFIni.SectionExists('sounds') then
           begin
+            FreeAndNil(MapMissionsSounds); // AUDIT: never leak the previous map's list
             MapMissionsSounds := TStringList.Create;
             TDFIni.ReadSection('sounds', MapMissionsSounds);
           end;
           if TDFIni.SectionExists('features') then
           begin
+            FreeAndNil(MapMissionsFeatures); // AUDIT: never leak the previous map's list
             MapMissionsFeatures := TStringList.Create;
             TDFIni.ReadSection('features', MapMissionsFeatures);
           end;
           if TDFIni.SectionExists('unitsmissions') then
           begin
+            FreeAndNil(MapMissionsUnitsInitialMissions); // AUDIT: never leak the previous map's list
             MapMissionsUnitsInitialMissions := TStringList.Create;
             TDFIni.ReadSection('unitsmissions', MapMissionsUnitsInitialMissions);
           end;
           if TDFIni.SectionExists('textmessages') then
           begin
+            FreeAndNil(MapMissionsTextMessages); // AUDIT: never leak the previous map's list
             MapMissionsTextMessages := TStringList.Create;
             SectionKeys := TStringList.Create;
             try
@@ -115,7 +119,7 @@ begin
     MapMissionsUnit.nUnitInfoID := 1;
     //MapMissionsUnit.p_UNITINFO := TAMem.UnitInfoId2Ptr(0);
 
-    MapMissionsUnit.p_Owner := TAPlayer.GetPlayerByIndex(TAData.LocalPlayerID);
+   MapMissionsUnit.p_Owner := @TAData.MainStruct.PlayersExt[TAData.LocalPlayerID];
     //if UNITS_AllocateUnit(@MapMissionsUnit, 0, 0, 0, 1) then
     //begin
       MapMissionsUnitInfo := PUnitInfo(TAMem.UnitInfoId2Ptr(MapMissionsUnit.nUnitInfoID))^;

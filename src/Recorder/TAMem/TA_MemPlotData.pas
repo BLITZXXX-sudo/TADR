@@ -57,6 +57,16 @@ begin
   FEATURES_Destroy(GridPlot, Method);
 end;
 
+
+
+
+// === ADD THIS ===
+function SHiWord(DWORD: LongWord): SmallInt;
+begin
+  Result := SmallInt((DWORD and $FFFF0000) shr 16);
+end;
+
+// === Now your existing code ===
 class function TAMap.PositionInLOS(Player: PPlayerStruct;
   Position: PPosition): Boolean;
 var
@@ -64,6 +74,11 @@ var
   Pos : Cardinal;
 begin
   Result := False;
+  // Player can be nil here when reached via the POSITION_IN_PLAYER_LOS COB
+  // extension with an out-of-range player-index argument (see
+  // TAPlayer.IsActive's comment) - guard before the native
+  // PositionInPlayerMapped call and the Player field reads below.
+  if (Player = nil) or (Position = nil) then Exit;
   if PositionInPlayerMapped(Player, Position) then
   begin
     X := SHiWord(Position.X) div 32;

@@ -26,10 +26,18 @@ var
 
 implementation
 uses
+  SysUtils,
   idplay,
   TA_MemoryLocations,
   GUIEnhancements,
   TA_MemUnits;
+
+// Diagnostic (2026-07-22): tracing the ARMARAD shield-radius chain - does
+// SetShield ever actually assign a non-nil ShieldedBy to some other unit
+// (i.e. does the protection ever really get applied). One-shot flag, own
+// diag log entry, does not affect behaviour.
+var
+  DiagLoggedShieldAssigned: Boolean = False;
 
 procedure SetShield(eax, edx: Pointer;
   CallbackRec: TUnitSearchCallbackRec; p_FoundUnit: PUnitStruct); register;
@@ -37,35 +45,39 @@ var
   UnitId: Word;
   bChangedState: Boolean;
   p_Shield: PUnitStruct;
-begin
-  p_Shield := CallbackRec.p_CallerUnit;
-  if p_FoundUnit <> p_Shield then
   begin
-    // found unit is other shield
-    UnitId := TAUnit.GetId(p_FoundUnit);
-    if UnitsCustomFields[UnitId].ShieldRange <> 0 then Exit;
-    if (TAUnit.IsAllied(p_Shield, UnitId) = 1) or
-       (p_Shield = nil) then
+    p_Shield := CallbackRec.p_CallerUnit;
+    if p_FoundUnit <> p_Shield then
     begin
-      bChangedState := (UnitsCustomFields[UnitId].ShieldedBy <> p_Shield);
-      UnitsCustomFields[UnitId].ShieldedBy := p_Shield;
-      if bChangedState then
+      // found unit is other shield
+      UnitId := TAUnit.GetId(p_FoundUnit);
+      if UnitsCustomFields[UnitId].ShieldRange <> 0 then Exit;
+      if (TAUnit.IsAllied(p_Shield, UnitId) = 1) or
+         (p_Shield = nil) then
       begin
-        if ForceBottomStateRefresh = 0 then
-          ForceBottomStateRefresh := 1;
-        if TAData.NetworkLayerEnabled then
+        bChangedState := (UnitsCustomFields[UnitId].ShieldedBy <> p_Shield);
+        UnitsCustomFields[UnitId].ShieldedBy := p_Shield;
+        if bChangedState and (p_Shield <> nil) then
+          LogDiagOnce(DiagLoggedShieldAssigned,
+            Format('SetShield: unit %d is now ShieldedBy generator %d',
+              [UnitId, TAUnit.GetId(p_Shield)]));
+        if bChangedState then
         begin
-          if Assigned(GlobalDPlay) then
+          if ForceBottomStateRefresh = 0 then
+            ForceBottomStateRefresh := 1;
+          if TAData.NetworkLayerEnabled then
           begin
-            if p_Shield <> nil then
-              GlobalDPlay.Broadcast_ExtraUnitState(UnitID, 1, TAUnit.GetId(p_Shield))
-            else
-              GlobalDPlay.Broadcast_ExtraUnitState(UnitID, 1, 0);
+            if Assigned(GlobalDPlay) then
+            begin
+              if p_Shield <> nil then
+                GlobalDPlay.Broadcast_ExtraUnitState(UnitID, 1, TAUnit.GetId(p_Shield))
+              else
+                GlobalDPlay.Broadcast_ExtraUnitState(UnitID, 1, 0);
+            end;
           end;
         end;
       end;
     end;
   end;
-end;
 
 end.

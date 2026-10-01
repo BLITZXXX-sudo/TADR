@@ -39,8 +39,7 @@ type
 
 const
   _FACDP = $877;
-function MAKE_DPHResult(code: variant) : HResult;
-
+  function MAKE_DPHResult(code: Integer) : HResult;
 const
 (*
  * GUIDS used by DirectPlay objects
@@ -1541,10 +1540,9 @@ type
 
 implementation
 
-// #define MAKE_DPHRESULT( code )    MAKE_HRESULT( 1, _FACDP, code )
-function MAKE_DPHResult(code: variant) : HResult;
+function MAKE_DPHResult(code: Integer) : HResult;
 begin
-  Result := (1 shl 31) or (_FACDP shl 16) or code;
+  Result := (1 shl 31) or (_FACDP shl 16) or (code and $FFFF);
 end;
 
 function ErrorString(Value: HResult) : string;

@@ -38,8 +38,15 @@ begin
                                   @OnInstallMaxScriptSlots,
                                   @OnUninstallMaxScriptSlots );
 
-    if IniSettings.ScriptSlotsLimit and
-       (IniSettings.ModId > 1) then
+    // NOTE: this used to also require (IniSettings.ModId > 1). That made
+    // this feature share a single on/off switch with a completely
+    // unrelated group of plugins (Builders/ScriptCallsExtend/OrdersOverride/
+    // UnitActions/Transporters/WeaponAimNTrajectory/GAFSequences/
+    // MapExtensions - see Plugins.pas), which are gated on ModId>1 for
+    // their own reasons and, as of this build, one of them crashes on
+    // load. Decoupled so script slot expansion can be tested/used on its
+    // own via IncScriptSlotsLimit alone, independent of ModId/that group.
+    if IniSettings.ScriptSlotsLimit then
     begin
       lReplacement := SizeOf(TNewScriptsData);
       Result.MakeReplacement( State_MaxScriptSlots,

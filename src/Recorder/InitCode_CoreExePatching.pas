@@ -5,27 +5,27 @@ http://blogs.msdn.com/oleglv/archive/2003/10/24/56141.aspx
 
 The following operations are specifically identified as being safe to perform inside a DllMain function: 
 
-·Initialization statics and globals. 
+ï¿½Initialization statics and globals. 
 
-·Calling functions in Kernel32.dll. This is always safe since Kernel32.dll must be loaded by the time DllMain is called. 
+ï¿½Calling functions in Kernel32.dll. This is always safe since Kernel32.dll must be loaded by the time DllMain is called. 
 
-·Creating synchronization objects such as critical sections and mutexes.
+ï¿½Creating synchronization objects such as critical sections and mutexes.
 
-·Accessing Thread Local Storage (TLS). 
+ï¿½Accessing Thread Local Storage (TLS). 
 
 
 The OS loader lock prohibits:
-·Dynamic binds. That includes LoadLibrary/UnloadLibrary calls or anything that
+ï¿½Dynamic binds. That includes LoadLibrary/UnloadLibrary calls or anything that
  may call implicitly call them
 
-·Locking of any kind. If you are trying to acquire a lock that is currently
+ï¿½Locking of any kind. If you are trying to acquire a lock that is currently
  help by a thread that needs OS loader lock (which you may be holding),
  you'll deadlock.
 
-·Cross-binary calls. As been discussed the binary youre calling into may not
+ï¿½Cross-binary calls. As been discussed the binary youre calling into may not
  have been initialized or have already been unutilized.
 
-·Starting new threads and then wait for completion. As discussed, thread in
+ï¿½Starting new threads and then wait for completion. As discussed, thread in
  question may need to acquire OS lock that you are holding.
 
 So we on-demand load stuff and work out some better finalization code
@@ -97,11 +97,16 @@ initialization
   DoInitialize := @OnInitialize;
   DoFinalize := @OnFinalize;
 
-  // To get around the loader lock problem, we inject a bunch of code into the start of the TA
-  // exe entry point. This executes after all the DLL entry points have.
   CodeInjectionData.AddyToPatch := Pointer($004E6FA0);
   CodeInjectionData.MyAddy := @InitThunk_Stage1;
   SpliceInJump( CodeInjectionData );
 
-  DllProc := @LibraryProc;
+  // NOTE: previously used System.DllProc to detect DLL_PROCESS_DETACH and
+  // call DoFinalize from there (a Delphi RTL hook not reliably present in FPC).
+  // Replaced with the 'finalization' section below, which both Delphi and
+  // FPC guarantee runs on library/unit unload.
+
+finalization
+  if Assigned(DoFinalize) then
+    DoFinalize();
 end.

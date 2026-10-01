@@ -222,7 +222,7 @@ begin
 //004BA0C3 018 81 FE 80 00 00 00                                   cmp     esi, 80h
 //004BA118 018 81 F9 80 00 00 00                                   cmp     ecx, 80h
 
-    Replacement := MinimapUIWidth + 1;
+    Replacement := MinimapUIWidth + 6;
 
     Result.MakeReplacement( State_MinimapExpand, 'panelbot repeat 1',
                             $0046A8B6, Replacement, 1);
@@ -244,7 +244,7 @@ begin
     Result.MakeReplacement( State_MinimapExpand, 'draw bps 2',
                             $004684C7, Replacement, 1);
 
-    Replacement := MinimapUIWidth - 2;
+    Replacement := MinimapUIWidth + 244;
 
     Result.MakeRelativeJmp( State_MinimapExpand,
                            'ModifyMinimapSize',

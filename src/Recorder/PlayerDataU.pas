@@ -99,7 +99,7 @@ type
       SharingLos        : boolean;
       TakeUnit          : Longword;
 
-    AlliedTo          : array [1..10] of boolean;
+    AlliedTo          : array [1..16] of boolean;
 
     IsFirstPlayerWithb3 : Boolean;
     // versioning support
@@ -135,6 +135,7 @@ type
     fData : TList;
     fDeletedPlayers : TList;
     fEveryonePlayer : TPlayerData;
+    fUnknownPlayer : TPlayerData;
     function GetData_( Index : Integer ) : TPlayerData;
     function getCount : Integer;
    public
@@ -161,6 +162,7 @@ type
     Property GetServerPlayer : TGetServerPlayerEvent read fGetServerPlayer write fGetServerPlayer;
 
     Property EveryonePlayer : TPlayerData read fEveryonePlayer;
+    Property UnknownPlayer : TPlayerData read fUnknownPlayer;
 
     Property DeletedPlayers : TList read fDeletedPlayers;
   end; {TPlayers} 
@@ -174,6 +176,13 @@ implementation
 uses
   sysutils,
   idplay;
+
+const
+  // MKChatMem is a SHARED memory mapping co-owned by TDRAW.dll and
+  // the exe, both of which have 10 slots compiled in. It CANNOT be
+  // widened from this DLL - doing so shifts every field after
+  // 'tastatus' by up to 456 bytes and corrupts both sides.
+  CHATVIEWSLOTS = 10;
 function BoolToStr( a : boolean ) : string;
 begin
 if a then
@@ -209,12 +218,12 @@ end; {Create}
 procedure TPlayerData.OnPlayerRemoved( Index : Integer );
 var i : Integer;
 begin
-if (Index >=1) and (Index <=10) then
+if (Index >=1) and (Index <=16) then
   begin
   ModInfo.ModID := -1;
-  for i := Index to 9 do
+  for i := Index to 15 do
     AlliedTo[i] := AlliedTo[i+1];
-  AlliedTo[10] := False;
+  AlliedTo[16] := False;
   end;
 end; {OnPlayerRemoved}
 
@@ -252,12 +261,22 @@ if TMethod(fGetServerPlayer).Code <> nil then
 
 fEveryonePlayer := TPlayerData.Create('Everyone', 0);
 fEveryonePlayer.PlayerIndex := 0;
+
+// Placeholder handed out instead of nil for a DPID we have never seen.
+// TDPlay.packethandler guards FromPlayer in about six places and then
+// dereferences it bare in forty more (.IsSelf, .Side, .StartInfo, .Name,
+// .PlayerIndex ...), which is the +$0C access violation. Returning a real,
+// inert object keeps those reads valid; PlayerIndex 0 keeps it out of the
+// live roster and out of any "is this a real player" test.
+fUnknownPlayer := TPlayerData.Create('<unknown>', High(Longword));
+fUnknownPlayer.PlayerIndex := 0;
 end; {Create}
 
 destructor TPlayers.Destroy;
 begin
 Clear;
 FreeAndNil( fEveryonePlayer );
+FreeAndNil( fUnknownPlayer );
 FreeAndNil( fData );
 FreeAndNil( fDeletedPlayers );
 inherited;
@@ -313,20 +332,24 @@ if Player <> nil then
     if assigned(PlayerRemoved) then
       PlayerRemoved(Player);
     aPlayerCount := Count;
-    if aPlayerCount > 10 then
+    if aPlayerCount > 16 then
       asm int 3 end;
     // update based on the player being removed
     for i := Player.PlayerIndex to aPlayerCount-1 do
       begin
       Data[i].OnPlayerRemoved( player.PlayerIndex );
-      chatview^.playernames[i] := chatview^.playernames[i+1];
-      chatview^.allies[i] := chatview^.allies[i+1];
-      chatview^.deathtimes[i] := chatview^.deathtimes[i+1];
-      chatview^.playerColors[i] := chatview^.playerColors[i+1];
-      chatview^.yehaplayground[i] := chatview^.yehaplayground[i+1];
+      // chatview is a fixed 10-slot SHARED mapping: only shuffle inside it
+      if (i >= 1) and (i < CHATVIEWSLOTS) then
+        begin
+        chatview^.playernames[i] := chatview^.playernames[i+1];
+        chatview^.allies[i] := chatview^.allies[i+1];
+        chatview^.deathtimes[i] := chatview^.deathtimes[i+1];
+        chatview^.playerColors[i] := chatview^.playerColors[i+1];
+        chatview^.yehaplayground[i] := chatview^.yehaplayground[i+1];
 
-      chatview^.otherMapX[i] := chatview^.otherMapX[i+1];
-      chatview^.otherMapY[i] := chatview^.otherMapX[i+1];
+        chatview^.otherMapX[i] := chatview^.otherMapX[i+1];
+        chatview^.otherMapY[i] := chatview^.otherMapY[i+1];
+        end;
       end;
     // remove the player
     fData.Delete( player.PlayerIndex-1 );      
@@ -334,14 +357,17 @@ if Player <> nil then
     for i := 0 to fData.Count-1 do
       TPlayerData(fData[i]).PlayerIndex := i+1;
     // zero out the last entry
-    for i := 1 to high(chatview^.playernames[aPlayerCount]) do
-      chatview^.playernames[aPlayerCount][i] := #0;
-    chatview^.allies[aPlayerCount] := 0;
-    chatview^.deathtimes[aPlayerCount] := 0;
-    chatview^.playerColors[aPlayerCount] := 0;
-    chatview^.yehaplayground[aPlayerCount] := 0;
-    chatview^.otherMapX[aPlayerCount] := -1;
-    chatview^.otherMapY[aPlayerCount] := -1;
+    if (aPlayerCount >= 1) and (aPlayerCount <= CHATVIEWSLOTS) then
+      begin
+      for i := 1 to high(chatview^.playernames[aPlayerCount]) do
+        chatview^.playernames[aPlayerCount][i] := #0;
+      chatview^.allies[aPlayerCount] := 0;
+      chatview^.deathtimes[aPlayerCount] := 0;
+      chatview^.playerColors[aPlayerCount] := 0;
+      chatview^.yehaplayground[aPlayerCount] := 0;
+      chatview^.otherMapX[aPlayerCount] := -1;
+      chatview^.otherMapY[aPlayerCount] := -1;
+      end;
 
 
     case LeaveState of
@@ -352,7 +378,32 @@ if Player <> nil then
     if assigned(fSendChatLocal) then
       SendChatLocal('player ' + player.Name + s)
   finally
-    player.Free;
+    // TOMBSTONE, do not Free.
+    // Convert() already searches fDeletedPlayers as a fallback, but nothing
+    // ever populated it - so any packet still in flight for this DPID after
+    // the removal fell through to "Result := nil" and was dereferenced at
+    // +$0C (the IP field) inside TDPlay.packethandler -> access violation.
+    // Keeping the object alive in the tombstone list makes those late packets
+    // resolve to a real, inactive TPlayerData instead of nil.
+    // The list is drained and freed in Clear/Destroy, so nothing leaks beyond
+    // the lifetime of the TPlayers instance.
+    if fDeletedPlayers <> nil then
+      begin
+      if fDeletedPlayers.IndexOf( player ) < 0 then
+        begin
+        player.PlayerIndex := 0;   // 0 = not in the live roster any more
+        fDeletedPlayers.Add( player );
+        // cap the tombstone list so a long game with lots of joins/leaves
+        // cannot grow it without bound
+        while fDeletedPlayers.Count > 64 do
+          begin
+          TPlayerData(fDeletedPlayers[0]).Free;
+          fDeletedPlayers.Delete(0);
+          end;
+        end;
+      end
+    else
+      player.Free;
   end
 end;
 
@@ -362,7 +413,11 @@ var
   player : TPlayerData;
 begin
 Player := Convert( DplayID, ZI_Invalidplayer, False );
-if Player <> nil then
+// Convert() also searches the tombstone list, so a duplicate/late "player
+// left" for an already-removed DPID can hand us an entry that is no longer
+// in fData. Removing it a second time would re-run the compaction with a
+// bogus PlayerIndex of 0. Ignore it.
+if (Player <> nil) and (Player.PlayerIndex >= 1) then
   Remove(player,LeaveState);
 end; 
 

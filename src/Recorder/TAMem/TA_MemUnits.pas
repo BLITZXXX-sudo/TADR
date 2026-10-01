@@ -146,7 +146,85 @@ var
   UnitInfoSt: PUnitInfo;
   Angle: Word;
   AtanX, AtanY: Integer;
+  p_Shield: PUnitStruct;
+  TargetUnitId, AttackerUnitId: Word;
 begin
+  Result := 0;
+
+  // p_DmgTakerUnit may point at an unused/empty unit-array slot: Id2Ptr only
+  // returns nil when the id is out of range, so an in-range-but-unassigned id
+  // (e.g. a stale/dead unit id from a COB script's own unit search) still
+  // yields a non-nil pointer whose p_UNITINFO is nil. Forwarding that straight
+  // into the native UNITS_MakeDamage crashes there.
+  //
+  // Verified by disassembling the actual crash site (TotalA.exe+0x489C94):
+  // "mov eax, [esi+0x96]" / "cmp dword ptr [eax], 0" with esi = p_TargetUnit.
+  // Per TUnitStruct's field layout, offset 0x96 is p_Owner (0x92 is
+  // p_UNITINFO) - the native code unconditionally dereferences the target's
+  // OWNER pointer, which is nil for units that exist (real UNITINFO) but
+  // have no assigned player (e.g. neutral/ownerless units). So both checks
+  // are needed - p_UNITINFO for "not a real unit at all", p_Owner for "a
+  // real unit but not one native damage code can safely touch".
+  if (p_DmgTakerUnit = nil) or (p_DmgTakerUnit.p_UNITINFO = nil) or
+     (p_DmgTakerUnit.p_Owner = nil) then
+    Exit;
+
+  // Same reasoning for the attacker: normalise anything that isn't a real,
+  // live unit down to a genuine nil. UNITS_MakeDamage(nil, ...) is already a
+  // supported pattern used elsewhere (self-destruct calls pass a nil maker),
+  // but a dangling non-nil pointer to an empty slot is not the same thing and
+  // must not be passed through as if it were a real attacker.
+  if (p_DmgMakerUnit <> nil) and (p_DmgMakerUnit.p_UNITINFO = nil) then
+    p_DmgMakerUnit := nil;
+
+  // Shield redirect (2026-07-22 round 7): TAUnit.MakeDamage is a SECOND,
+  // independent path into native damage - it's what backs the MAKE_DAMAGE
+  // COB extension, callable from ANY unit's own script (not just ARMARAD's -
+  // any custom weapon in this heavily-modded install that applies its damage
+  // via `get MAKE_DAMAGE(...)` instead of a native weapon-projectile impact
+  // goes through here). UnitActions_AntiDamageShieldHook only intercepts ONE
+  // specific native call site used for ordinary projectile impacts, so
+  // damage arriving through this path bypassed the shield entirely - a
+  // shielded unit could still die outright to a COB-scripted weapon while
+  // the shield generator's own bar never moved for that hit. Mirrors the
+  // same redirect decision as UnitActions.UnitActions_AntiDamageShield
+  // (allied damage isn't blocked; a non-flying attacker standing outside the
+  // shield's own radius can still snipe past it), skipped entirely for
+  // dtHeal since that's not damage.
+  if (DamageType <> dtHeal) then
+  begin
+    TargetUnitId := TAUnit.GetId(p_DmgTakerUnit);
+    p_Shield := UnitsCustomFields[TargetUnitId].ShieldedBy;
+
+    // Same stale-shield guard as UnitActions_AntiDamageShield: a dead
+    // generator's ShieldedBy pointer lingers until its own next scan would
+    // have cleared it, so treat a torn-down generator as no shield instead
+    // of dereferencing it.
+    if (p_Shield <> nil) and (p_Shield.p_UNITINFO = nil) then
+    begin
+      UnitsCustomFields[TargetUnitId].ShieldedBy := nil;
+      p_Shield := nil;
+    end;
+
+    if (p_Shield <> nil) and (p_DmgMakerUnit <> nil) then
+    begin
+      if TAUnit.IsAllied(p_DmgMakerUnit, TargetUnitId) = 1 then
+        p_Shield := nil // allied/self damage isn't blocked by the shield
+      else if (TAUnit.GetUnitInfoField(p_DmgMakerUnit, uiCANFLY) = 0) and
+              (TAMem.DistanceBetweenPosCompare(@p_DmgMakerUnit.Position,
+                @p_Shield.Position, UnitsCustomFields[TAUnit.GetId(p_Shield)].ShieldRange)) then
+        p_Shield := nil; // non-flying attacker outside the shield's own radius
+    end;
+
+    if (p_Shield <> nil) then
+    begin
+      AttackerUnitId := TAUnit.GetId(p_DmgMakerUnit);
+      TAUnit.CobStartScript(p_Shield, 'Shield', @Amount, @AttackerUnitId, @TargetUnitId, nil, False);
+      Result := TAUnit.GetHealth(p_DmgTakerUnit);
+      Exit;
+    end;
+  end;
+
   UnitInfoSt := p_DmgTakerUnit.p_UNITINFO;
   case DamageType of
     dtWeapon..dtParalyze :
@@ -249,7 +327,7 @@ begin
   p_Unit.nUnitInfoID := NewUnitInfo.nCategory;
   p_Unit.p_UNITINFO := NewUnitInfo;
 
-  if Broadcast and TAData.NetworkLayerEnabled then
+  if Broadcast and TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
     GlobalDPlay.Broadcast_UnitInfoSwap(TAUnit.GetID(p_Unit), NewUnitInfo.CRC_FBI);
 end;
 
@@ -286,7 +364,7 @@ begin
     end;
     Result:= True;
   end;
-end;  
+end;
 
 class function TAUnit.GetAttackerID(p_Unit: PUnitStruct) : LongWord;
 begin
@@ -720,7 +798,7 @@ var
 begin
   if OwnerIndex = 10 then
     OwnerIndex := TAData.LocalPlayerID;
-    
+
   Result := UNITS_Create( OwnerIndex,
                           UnitInfo.nCategory,
                           Position.X,
@@ -729,7 +807,7 @@ begin
                           1,
                           UnitState,
                           0 );
-                          
+
   if (Result <> nil) then
   begin
     UnitSt := Pointer(Result);
@@ -781,7 +859,14 @@ end;
 
 class procedure TAUnit.Kill(p_Unit: PUnitStruct; deathtype: byte);
 begin
-  if p_Unit <> nil then
+  // Same convention as TAUnit.MakeDamage / UnitActions_AntiDamageShield:
+  // p_Unit can be a non-nil pointer into an empty/unused unit-array slot
+  // (e.g. Id2Ptr on a stale/invalid id from a COB script), or a real unit
+  // with no assigned player. Native UNITS_MakeDamage unconditionally
+  // dereferences the target's p_Owner (confirmed via disassembly of
+  // TotalA.exe+0x489C94 - offset 0x96 in TUnitStruct), so both need to be
+  // valid before calling into it.
+  if (p_Unit <> nil) and (p_Unit.p_UNITINFO <> nil) and (p_Unit.p_Owner <> nil) then
   begin
     case deathtype of
       0 : UNITS_MakeDamage(nil, p_Unit, 30000, 3, 0);
@@ -972,7 +1057,7 @@ begin
                             lPar4, lPar3, lPar2, lPar1,
                             ParamsCount, Guaranteed, nil,
                             PAnsiChar(ProcName));
-    end;                            
+    end;
   end;
 end;
 
@@ -1147,7 +1232,7 @@ begin
   //  FreeCustomUnitInfo(p_Unit);
   end;
 
-  if Broadcast and TAData.NetworkLayerEnabled then
+  if Broadcast and TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
     GlobalDPlay.Broadcast_UnitGrantUnitInfo(TAUnit.GetId(p_Unit), ANewState);
 end;
 
@@ -1203,7 +1288,7 @@ begin
     uiCanHover           : Result := Byte((UseTemplate.UnitTypeMask and (1 shl 12)) > 0 );
     uiAmphibious         : Result := Byte((UseTemplate.UnitTypeMask and (1 shl 21)) > 0 );
     uiFloater            : Result := Byte((UseTemplate.UnitTypeMask and (1 shl 19)) > 0 );
-    
+
     uiMaxDamage          : Result := UseTemplate.lMaxDamage;
     uiDamageModifier     : Result := UseTemplate.lDamageModifier;
     uiHideDamage         : Result := Byte((UseTemplate.UnitTypeMask and (1 shl 14)) > 0 );
@@ -1405,7 +1490,7 @@ begin
       uiSelfDestructAs     : UnitInfo.p_SelfDestructAsAs := PLongWord(TAWeapon.WeaponId2Ptr(value));
       uiSoundCategory      : UnitInfo.nSoundCategory := Word(value);
       uiShowPlayerName     : SetUnitTypeMask(UnitID, 1, (value = 1), $20000);
-//      uiShootMe            : SetUnitTypeMask(UnitID, 0, (value = 1), 1 shl 15);      
+//      uiShootMe            : SetUnitTypeMask(UnitID, 0, (value = 1), 1 shl 15);
     end;
     Result:= True;
   end;
@@ -1615,8 +1700,8 @@ begin
         Continue;
 
     if not TAUnits.UnitsFilterVsUnit(CheckedUnitSt, Filter, UnitSt.p_Owner) then
-      Continue;        
-      
+      Continue;
+
 //    CheckedUnitInfoSt := Pointer(CheckedUnitSt.p_UNITINFO);
     if UnitId <> Word(UnitSt.lUnitInGameIndex) then
     begin
@@ -1902,4 +1987,5 @@ begin
 end;
 
 end.
+
 

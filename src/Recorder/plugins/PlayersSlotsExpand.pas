@@ -54,7 +54,7 @@ begin
                                   @OnUninstallPlayersSlotsExpand );
 
     cMaxplayers := 32;
-    
+
     Result.MakeReplacement( State_PlayersSlotsExpand,
                             '',
                             $00464995, cMaxPlayers, 1);
@@ -63,7 +63,7 @@ begin
                             'Load game init players array',
                             @InitPlayersArray,
                             $00464992, 0);
-    
+
     Result.MakeRelativeJmp( State_PlayersSlotsExpand,
                             '',
                             @SetPlayerStructMem,
@@ -76,11 +76,11 @@ procedure InitPlayersArr; stdcall;
 var
   i : Integer;
 begin
-  for i := 0 to 32 do
+  for i := 0 to 16 do
   begin
     InitPlayerStruct(@PlayersExp[i]);
     // once finished this should be commented
-    if i < 11 then
+    if i < 16 then
       InitPlayerStruct(@TAData.MainStruct.Players[i]);
   end;
 end;
@@ -103,9 +103,12 @@ asm
   shl     ecx, 5
   add     ecx, eax
   lea     ecx, [ecx+ecx*4]
+  add  eax, ecx
   lea     eax, [esi+ecx*2]
   push $004010A2;
   call PatchNJump;
+
+
 end;
 
 {
@@ -221,3 +224,4 @@ sub_446FB0
 }
 
 end.
+

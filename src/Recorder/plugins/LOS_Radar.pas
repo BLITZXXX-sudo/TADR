@@ -157,13 +157,13 @@ l1:
 
   // TestPlayerPtr = TAdynmemStruct.Players[0]
   mov eax, esi
-  add eax, Cardinal(TTADynMemStruct.Players)
+  add eax, Cardinal(TTADynMemStruct.PlayersExt)
   mov TestPlayerPtr, eax
   
   // PlayerPtr = TAdynmemStruct.Players[ViewPlayer]
-  add esi, Cardinal(TTADynMemStruct.Players)
+  add esi, Cardinal(TTADynMemStruct.PlayersExt)
   mov eax, type TPlayerStruct
-  mul eax, ecx
+  mul ecx
   add esi, eax
   mov PlayerPtr, esi
 
@@ -227,7 +227,7 @@ TryNextPlayer_Condition:
   mov     [esp+14h], edi // [esp+38h+Units_Index]
   mov     [esp+10h], ebx  // [esp+38h+Units_EndMarker]
   lea     ecx, [ecx+ecx*4]
-  lea     ebp, [esi+ecx*2+TTADynMemStruct.Players]
+  lea     ebp, [esi+ecx*2+TTADynMemStruct.PlayersExt]
 
 
   // code thumped by injecting the jmp statement

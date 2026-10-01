@@ -60,11 +60,23 @@ var
   AIName : string = 'AI:%s %d';
 procedure BetterAIName( AIPlayerSlot : integer; name : pchar; buffer : pchar) stdcall;
 var
-  len : integer;
+  suffix, owner, s : string;
+  room : integer;
 begin
-buffer[16] := #0;
-len := FormatBuf(buffer^,16,AIName[1],length(AIName),[name,AIPlayerSlot]);
-buffer[len] := #0;
+// Result must fit in 16 chars. The old code cut the END off, so with a long
+// owner name the number was lost ("AI:CXXdddddddd 11" -> "AI:CXXdddddddd 1",
+// several AIs looked identical). Now the owner's name is shortened instead,
+// so the slot number is always complete: "AI:CXXdddddd 11".
+suffix := ' ' + IntToStr(AIPlayerSlot);
+owner := StrPas(name);
+room := 16 - 3 - Length(suffix);          // 3 = 'AI:'
+if room < 1 then room := 1;
+if Length(owner) > room then
+  owner := Copy(owner, 1, room);
+s := 'AI:' + owner + suffix;
+if Length(s) > 16 then SetLength(s, 16);
+Move(PChar(s)^, buffer^, Length(s));
+buffer[Length(s)] := #0;
 end;
 
 procedure BetterAINameStub;

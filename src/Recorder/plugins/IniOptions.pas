@@ -47,6 +47,7 @@ type
     DrawBuildSpotQueueNano : Boolean;
     ClockPosition          : Byte;
     ScoreBoard             : Boolean;
+    Cloaker                : String;    // CloakOnly: unit name(s) that project the cloak field
     ExplosionsGameUIExpand : Integer;
 //    ExpandMinimap          : Boolean;
 
@@ -110,33 +111,37 @@ begin
   end;
 end;
 
-// read INI file name from TA's memory
+// read INI file name
+//
+// NOTE: this used to read the filename out of Totala_ini, a fixed
+// address baked into TA's own data section ($005098A3). That worked on
+// an unmodified retail 3.1 exe, but on this rebuilt/patched exe that
+// memory is readable-but-unreliable: IsBadReadPtr sees a valid page, but
+// the bytes there aren't guaranteed to still be "totala.ini" - they were
+// observed to vary between otherwise-identical launches of the same exe
+// (tplayx_init.log showed IniSettings.ModId flipping between 1337 and -1
+// run to run with nothing on disk changing). Since ModId/ScriptSlotsLimit
+// gate the MaxScriptSlots hard-coded-address patch set, a bad read here
+// was silently making that plugin's activation nondeterministic and hard
+// to reproduce. Resolve by filename directly instead - deterministic,
+// and totala.ini is what this install actually uses.
 var
   iniPath_cache : string;
 function GetINIFileName: string;
 var
- iniName: string;
  tempPath: string;
 begin
 if iniPath_cache = '' then
 begin
-  Result:= #0;
-  try
-    iniName:= PIniFileName(Totala_ini)^;
-    Trim(iniName);
-    if TaFileExists(iniName, tempPath) then
-      iniPath_cache:= tempPath
-    else
-      iniPath_cache:= #0;
-    result:= iniPath_cache;
-  except
-    //shouldn't fail, however ...
-    if TaFileExists('totala.ini', tempPath) then
-      iniPath_cache:= tempPath
-    else
-      iniPath_cache:= #0;
-    result:= iniPath_cache;
-  end;
+  if TaFileExists('totala.ini', tempPath) then
+    iniPath_cache:= tempPath
+  else if TaFileExists('ProTA.ini', tempPath) then
+    iniPath_cache:= tempPath
+  else if TaFileExists('Settings.ini', tempPath) then
+    iniPath_cache:= tempPath
+  else
+    iniPath_cache:= #0;
+  result:= iniPath_cache;
 end else
   result:= iniPath_cache;
 end;
@@ -315,6 +320,7 @@ begin
   IniSettings.DrawBuildSpotQueueNano := False;
   IniSettings.ClockPosition := 0;
   IniSettings.ScoreBoard := False;
+  IniSettings.Cloaker := 'ARMRAD';
   IniSettings.ExplosionsGameUIExpand := 0;
   IniSettings.StopButton := False;
   IniSettings.ScriptSlotsLimit := False;
@@ -380,6 +386,11 @@ begin
       IniSettings.DrawBuildSpotQueueNano := ReadIniBool(IniFile, 'Preferences', 'DrawBuildSpotQueueNano', False);
       IniSettings.ClockPosition := ReadIniValue(IniFile, 'Preferences', 'ClockPosition', 0);
       IniSettings.ScoreBoard := ReadIniBool(IniFile, 'Preferences', 'ScoreBoard', False);
+      // CLOAKER=ARMRAD  (or several: CLOAKER=ARMRAD,CORRAD; NONE = cloak field off;
+      // line missing = ARMRAD)
+      IniSettings.Cloaker := Trim(ReadIniString(IniFile, 'Preferences', 'Cloaker', 'ARMRAD'));
+      if IniSettings.Cloaker = '' then
+        IniSettings.Cloaker := 'ARMRAD';
       IniSettings.ExplosionsGameUIExpand := ReadIniValue(IniFile, 'Preferences', 'ExplosionsGameUIExpand', 0);
 //      IniSettings.ExpandMinimap := ReadIniBool(IniFile, 'Preferences', 'ExpandMinimap', False);
 
@@ -410,7 +421,7 @@ begin
         if ReadModsIniField('Version') <> '' then
           IniSettings.Version:= ReadModsIniField('Version');
     end;
-    
+
     LocalModInfo.ModID := IniSettings.ModID;
     if IniSettings.Version <> '' then
     begin
@@ -448,4 +459,3 @@ begin
 end;
 
 end.
-

@@ -1,7 +1,8 @@
+{$MODE DELPHI}
 library tplayx;
 
 uses
-  ListsU in '..\ListsU.pas',
+  ListsU in 'ListsU.pas',
   InitCode in 'InitCode.pas',
   InitCode_CoreExePatching in 'InitCode_CoreExePatching.pas',
   LOS_extensions in 'plugins\LOS_extensions.pas',
@@ -12,22 +13,21 @@ uses
   SpeedHack in 'plugins\SpeedHack.pas',
   MultiAILimit in 'plugins\MultiAILimit.pas',
   TA_MemoryLocations in 'TAMem\TA_MemoryLocations.pas',
-  logging in '..\logging.pas',
-  packet_old in '..\packet_old.pas',
-  textdata in '..\textdata.pas',
+  logging in 'logging.pas',
+  packet_old in 'packets\packet_old.pas',
+  textdata in 'textdata.pas',
   MemMappedDataStructure in 'MemMappedDataStructure.pas',
   DPLobbyWrapper in 'DPLobbyWrapper.pas',
   TADemoConsts in 'TADemoConsts.pas',
-  Dplayx_exports in 'Dplayx_exports.pas',
   TAMemManipulations in 'TAMem\TAMemManipulations.pas',
-  uDebug in '..\uDebug.pas',
+  uDebug in 'uDebug.pas',
   TA_NetworkingMessages in 'netmsgHandling\TA_NetworkingMessages.pas',
-  TextFileU in '..\TextFileU.pas',
+  TextFileU in 'TextFileU.pas',
   PacketBufferU in 'packets\PacketBufferU.pas',
   DPlay in 'DPlay.pas',
   DPLobby in 'DPLobby.pas',
   log2 in 'log2.pas',
-  PlayerDataU in 'PlayerDataU.pas',
+      DataU in 'PlayerDataU.pas',
   CommandHandlerU in 'CommandHandlerU.pas',
   idplay in 'idplay.pas',
   PluginCommandHandlerU in 'plugins\PluginCommandHandlerU.pas',
@@ -77,13 +77,27 @@ uses
   MaxScriptSlots in 'plugins\MaxScriptSlots.pas',
   SkirmishEnhancements in 'plugins\SkirmishEnhancements.pas',
   UnitSearchHandlers in 'plugins\UnitSearchHandlers.pas',
+  CloakOnly in 'plugins\CloakOnly.pas',
   Transporters in 'plugins\Transporters.pas',
   OrdersOverride in 'plugins\OrdersOverride.pas',
   Developers in 'plugins\Developers.pas',
   BroadcastNanolathe in 'plugins\BroadcastNanolathe.pas',
-  NanoFrameUnits in 'plugins\NanoFrameUnits.pas';
+  NanoFrameUnits in 'plugins\NanoFrameUnits.pas',
+  QueueDiag in 'plugins\QueueDiag.pas',
+  Dplayx_exports in 'Dplayx_exports.pas';
 
 {$R *.res}
+
+exports
+  DirectPlayCreate index 1,
+  DirectPlayEnumerateA index 2,
+  DirectPlayEnumerateW index 3,
+  DirectPlayLobbyCreateA index 4,
+  DirectPlayLobbyCreateW index 5,
+  gdwDPlaySPRefCount index 6,
+  DirectPlayEnumerate index 9,
+  DllCanUnloadNow index 10,
+  DllGetClassObject index 11;
 
 begin
 end.

@@ -221,25 +221,28 @@ procedure SpliceInJump( var CodeInjectionData : TCodeInjectionData );  stdcall;
 var
   RelativeJumpRec : TRelativeJumpRec;
   Count : Longword;
-
-  Writesize, OldProtect,tmpOldProtect : longword;
+  Writesize, OldProtect : longword;
 begin
-RelativeJumpRec.RelativeJmpInstruction := RelativeJump_Instruction;
-RelativeJumpRec.DistanceToJump := longword( longint(CodeInjectionData.MyAddy) - longint(CodeInjectionData.AddyToPatch) - SizeOf(RelativeJumpRec) );
+  RelativeJumpRec.RelativeJmpInstruction := RelativeJump_Instruction;
+  RelativeJumpRec.DistanceToJump := longword( longint(CodeInjectionData.MyAddy) - longint(CodeInjectionData.AddyToPatch) - SizeOf(RelativeJumpRec) );
 
-
-Writesize := Length(CodeInjectionData.BackupData);
-Win32Check( VirtualProtect( CodeInjectionData.AddyToPatch, Writesize, PAGE_READWRITE, OldProtect ) );
-try
+  Writesize := Length(CodeInjectionData.BackupData);
+  // Use PAGE_EXECUTE_READWRITE so the page stays executable while we write.
+  // PAGE_READWRITE alone strips the execute bit which can fail on systems
+  // where DEP or a modded ddraw.dll has set stricter page protections.
+  Win32Check( VirtualProtect( CodeInjectionData.AddyToPatch, Writesize, PAGE_EXECUTE_READWRITE, OldProtect ) );
   Win32Check( ReadProcessMemory( GetCurrentProcess, CodeInjectionData.AddyToPatch,
                                  @CodeInjectionData.BackupData[0],
                                  Writesize, Count ) );
   Win32Check( WriteProcessMemory( GetCurrentProcess, CodeInjectionData.AddyToPatch,
                                   @RelativeJumpRec,
-                                 Writesize, Count ) );
-finally
-  Win32Check( VirtualProtect( CodeInjectionData.AddyToPatch, Writesize, OldProtect, tmpOldProtect ) );
-end;                                  
+                                  Writesize, Count ) );
+  // Flush CPU instruction cache so patched bytes are seen immediately.
+  FlushInstructionCache( GetCurrentProcess, CodeInjectionData.AddyToPatch, Writesize );
+  // NOTE: intentionally NOT restoring old protection.
+  // tdraw.dll's MemWriteWithBackup restores PAGE_EXECUTE_READ after its own patches,
+  // which would re-lock our pages on ARM/Windows 11 before our JMP is executed.
+  // Leaving PAGE_EXECUTE_READWRITE is safe — TA is a single-process game, not a system DLL.
 end; {SpliceInJump}
 
 procedure UnSpliceJump( const CodeInjectionData : TCodeInjectionData );  stdcall;
@@ -248,7 +251,7 @@ var
   Writesize, OldProtect,tmpOldProtect : longword;  
 begin
 Writesize := Length(CodeInjectionData.BackupData);
-Win32Check( VirtualProtect( CodeInjectionData.AddyToPatch, Writesize, PAGE_READWRITE, OldProtect ) );
+Win32Check( VirtualProtect( CodeInjectionData.AddyToPatch, Writesize, PAGE_EXECUTE_READWRITE, OldProtect ) );
 try
   Win32Check( WriteProcessMemory( GetCurrentProcess,
                       CodeInjectionData.AddyToPatch,
@@ -277,7 +280,7 @@ var
 begin
 Writesize := longword( length(fOriginalData) );
 
-Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_READWRITE, OldProtect ) );
+Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_EXECUTE_READWRITE, OldProtect ) );
 try
   Win32Check( WriteProcessMemory( GetCurrentProcess,
                       pointer(InjectionPoint),
@@ -316,7 +319,7 @@ CurrentProcessHandle := GetCurrentProcess;
 Writesize := length(NewData);
 setlength(fOriginalData, Writesize);
 
-Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_READWRITE, OldProtect ) );
+Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_EXECUTE_READWRITE, OldProtect ) );
 try
   Win32Check( ReadProcessMemory( CurrentProcessHandle,
                      pointer(InjectionPoint),
@@ -367,7 +370,7 @@ data.DistanceToJump := Longword(  integer(JumpToAddress) - integer(InjectionPoin
 Writesize := sizeof(data);
 setlength(fOriginalData, WriteSize);
 
-Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_READWRITE, OldProtect ) );
+Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_EXECUTE_READWRITE, OldProtect ) );
 try
   Win32Check( ReadProcessMemory( CurrentProcessHandle,
                      pointer(InjectionPoint),
@@ -422,7 +425,7 @@ data.RelativeJump.DistanceToJump := Longword(  integer(JumpToAddress) - integer(
 assert( Writesize <= sizeof(data));
 setlength(fOriginalData, WriteSize);
 
-Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_READWRITE, OldProtect ) );
+Win32Check( VirtualProtect( pointer(InjectionPoint), Writesize, PAGE_EXECUTE_READWRITE, OldProtect ) );
 try
   Win32Check( ReadProcessMemory( CurrentProcessHandle,
                      pointer(InjectionPoint),

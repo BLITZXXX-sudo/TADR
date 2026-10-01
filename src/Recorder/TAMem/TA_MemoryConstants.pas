@@ -3,7 +3,13 @@ unit TA_MemoryConstants;
 interface
 
 const
-  MAXPLAYERCOUNT = 10;
+  MAXPLAYERCOUNT = 16;        // ProTA: array at TAMain+0x3A000, 16 * 0x14B
+  MAXUNITLIMITPLAYERS = 10;   // NO LONGER USED. Kept for reference.
+                              // Pinning the unit-limit math to 10 caused a
+                              // load-thread crash: unit ids span ALL player
+                              // slots, so UnitsCustomFields must be sized
+                              // with MAXPLAYERCOUNT. Only the chatview
+                              // arrays must stay at 10 (shared with TDRAW).
 
   TAdynmemStructPtr = $00511DE8;
   TAMovementClassArray = $00512358;

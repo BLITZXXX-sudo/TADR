@@ -1,11 +1,11 @@
 /// SynLZ Compression routines
-// - licensed under a MPL/GPL/LGPL tri-license; version 1.17
+// - licensed under a MPL/GPL/LGPL tri-license; version 1.18
 unit SynLZ;
 
 {
     This file is part of Synopse SynLZ Compression.
 
-    Synopse SynLZ Compression. Copyright (C) 2012 Arnaud Bouchez
+    Synopse SynLZ Compression. Copyright (C) 2016 Arnaud Bouchez
       Synopse Informatique - http://synopse.info
 
   *** BEGIN LICENSE BLOCK *****
@@ -24,10 +24,11 @@ unit SynLZ;
 
   The Initial Developer of the Original Code is Arnaud Bouchez.
 
-  Portions created by the Initial Developer are Copyright (C) 2012
+  Portions created by the Initial Developer are Copyright (C) 2016
   the Initial Developer. All Rights Reserved.
 
   Contributor(s):
+
   Alternatively, the contents of this file may be used under the terms of
   either the GNU General Public License Version 2 or later (the "GPL"), or
   the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
@@ -188,7 +189,15 @@ unit SynLZ;
   - fixed potential GPF issue in Hash32() function
 
   Version 1.17
-  - Use RawByteString type for CompressSynLZ() function prototype 
+  - Use RawByteString type for CompressSynLZ() function prototype
+
+  Version 1.18
+  - unit fixed and tested with Delphi XE2 and up 64-bit compiler
+  - introducing SynLZCompress1/SynLZDecompress1 low-level functions
+  - added SynLZdecompress1partial() function for partial and secure (but slower)
+    decompression - implements feature request [82ca067959]
+  - removed several compilation hints when assertions are set to off
+  - some performance optimization, especially when using a 64bit CPU
 
 }
 
@@ -202,37 +211,51 @@ function SynLZcompressdestlen(in_len: integer): integer;
 /// get uncompressed size from lz-compressed buffer (to reserve memory, e.g.)
 function SynLZdecompressdestlen(in_p: PAnsiChar): integer;
 
-/// 1st compression method uses hashing with a 32bits control word
+/// 1st compression algorithm uses hashing with a 32bits control word
 function SynLZcompress1pas(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
-/// 1st compression method uses hashing with a 32bits control word
-function SynLZdecompress1pas(src: PAnsiChar; size: integer; dst: PAnsiChar): Integer;
 
-{$ifndef PUREPASCAL}
-/// optimized asm version of the 1st compression method
+/// 1st compression algorithm uses hashing with a 32bits control word
+// - this is the fastest pure pascal implementation
+function SynLZdecompress1pas(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
+
+/// 1st compression algorithm uses hashing with a 32bits control word
+// - this overload function is slower, but will allow to uncompress only the start
+// of the content (e.g. to read some metadata header)
+// - it will also check for dst buffer overflow, so will be more secure than
+// other functions, which expect the content to be verified (e.g. via CRC)
+function SynLZdecompress1partial(src: PAnsiChar; size: integer; dst: PAnsiChar;
+  maxDst: integer): integer;
+
+{$ifdef PUREPASCAL}
+var
+  /// fastest available SynLZ compression (using 1st algorithm)
+  SynLZCompress1: function(
+    src: PAnsiChar; size: integer; dst: PAnsiChar): integer = SynLZcompress1pas;
+
+  /// fastest available SynLZ decompression (using 1st algorithm)
+  SynLZDecompress1: function(
+    src: PAnsiChar; size: integer; dst: PAnsiChar): integer = SynLZDecompress1pas;
+    
+{$else}
+
+/// optimized x86 asm version of the 1st compression algorithm
 function SynLZcompress1asm(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
-/// optimized asm version of the 1st compression method
-function SynLZdecompress1asm(src: PAnsiChar; size: integer; dst: PAnsiChar): Integer;
+/// optimized x86 asm version of the 1st compression algorithm
+function SynLZdecompress1asm(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
+
+/// fastest available SynLZ compression (using x86 asm on 1st algorithm)
+function SynLZcompress1(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
+
+/// fastest available SynLZ decompression (using x86 asm on 1st algorithm)
+function SynLZdecompress1(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
 {$endif PUREPASCAL}
 
-/// 2nd compression method optimizes pattern copy -> a bit smaller, but slower
+/// 2nd compression algorithm optimizing pattern copy
+// - this algorithm is a bit smaller, but slower, so the 1st method is preferred
 function SynLZcompress2(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
-/// 2nd compression method optimizes pattern copy -> a bit smaller, but slower
-function SynLZdecompress2(src: PAnsiChar; size: integer; dst: PAnsiChar): Integer;
-
-{$ifndef UNICODE}
-type
-  /// define RawByteString, as it does exist in Delphi 2009 and up
-  // - to be used for byte storage into an AnsiString
-  RawByteString = AnsiString;
-{$endif}
-
-/// compress a data content using the SynLZ algorithm
-// - as expected by THttpSocket.RegisterCompress
-// - will return 'synlz' as ACCEPT-ENCODING: header parameter
-// - will store a hash of both compressed and uncompressed stream: if the
-// data is corrupted during transmission, will instantly return ''
-function CompressSynLZ(var Data: RawByteString; Compress: boolean): RawByteString;
-
+/// 2nd compression algorithm optimizing pattern copy
+// - this algorithm is a bit smaller, but slower, so the 1st method is preferred
+function SynLZdecompress2(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
 
 implementation
 
@@ -247,38 +270,33 @@ type
   PtrUInt = {$ifdef CPUX64} NativeUInt {$else} cardinal {$endif};
 {$endif}
 
-{$ifndef CONDITIONALEXPRESSIONS}
+{$ifdef DELPHI5OROLDER}
 type // Delphi 5 doesn't have those base types defined :(
   PByte = ^Byte;
   PWord = ^Word;
-  PInteger = ^Integer;
+  PInteger = ^integer;
   PCardinal = ^Cardinal;
-  IntegerArray  = array[0..$effffff] of Integer;
+  IntegerArray  = array[0..$effffff] of integer;
   PIntegerArray = ^IntegerArray;
+
 {$endif}
 
 function SynLZdecompressdestlen(in_p: PAnsiChar): integer;
 // get uncompressed size from lz-compressed buffer (to reserve memory, e.g.)
 begin
-  result := pWord(in_p)^;
+  result := PWord(in_p)^;
   inc(in_p,2);
   if result and $8000<>0 then
-    result := (result and $7fff) or (integer(pWord(in_p)^) shl 15);
-end;
-
-procedure movechars(s,d: PAnsiChar; t: integer);
-// fast code for unaligned and overlapping (see {$define WT}) small blocks
-// this code is sometimes used rather than system.Move() by decompress2()
-var i: integer;
-begin
-  for i := 1 to t do begin
-    d^ := s^;
-    inc(d);
-    inc(s);
-  end;
+    result := (result and $7fff) or (integer(PWord(in_p)^) shl 15);
 end;
 
 {$ifndef PUREPASCAL}
+// using direct x86 jmp also circumvents Internal Error C11715 for Delphi 5
+function SynLZcompress1(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
+asm
+  jmp SynLzCompress1Asm
+end;
+
 function SynLZcompress1asm(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
 asm
         push    ebp
@@ -286,11 +304,11 @@ asm
         push    esi
         push    edi
         push    eax
-        mov     eax, 8                                 
+        mov     eax, 8
 @@0906: add     esp, -4092
-        push    eax                                    
+        push    eax
         dec     eax
-        jnz     @@0906                                 
+        jnz     @@0906
         mov     eax, [esp+8000H]
         add     esp, -32
         mov     esi, ecx
@@ -324,10 +342,10 @@ asm
         mov     eax, esi
         mov     [esp+18H], eax
         xor     edx, edx
-        mov     [eax], edx                   
+        mov     [eax], edx
         add     esi, 4
-        lea     eax, [esp+24H]                         
-        xor     ecx, ecx                               
+        lea     eax, [esp+24H]
+        xor     ecx, ecx
         mov     edx, 16384
         call    system.@fillchar
         // main loop:
@@ -335,8 +353,8 @@ asm
         ja      @@0900
 @@0892: mov     edx, [edi]
         mov     eax, edx
-        shr     edx, 12                                
-        xor     edx, eax                               
+        shr     edx, 12
+        xor     edx, eax
         and     edx, 0FFFH
         mov     ebp, [esp+edx*4+24H]
         mov     ecx, [esp+edx*4+4024H]
@@ -350,7 +368,7 @@ asm
         or      ebp,ebp
         jz      @@0897
         sub     eax, ebp
-        cmp     eax, 2                                 
+        cmp     eax, 2
         mov     ecx, [esp+18H]
         jle     @@0897
         mov     eax,[ecx]
@@ -447,25 +465,24 @@ type
   PByteArray = ^TByteArray;
 
 function SynLZcompress1pas(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
-var dst_beg, // initial dst value
+var dst_beg,          // initial dst value
     src_end,          // real last byte available in src
     src_endmatch,     // last byte to try for hashing
-    o: pAnsiChar;
+    o: PAnsiChar;
     CWbit: byte;
-    CWpoint: PInteger;
-    h, v, cached: integer;
-    t, tmax: integer;
-    offset: array[0..4095] of PAnsiChar; // 16KB+16KB=32KB hashing code
-    cache: array[0..4095] of integer;
+    CWpoint: PCardinal;
+    v, h, cached, t, tmax: PtrUInt;
+    offset: array[0..4095] of PAnsiChar;
+    cache: array[0..4095] of cardinal; // 16KB+16KB=32KB on stack (48KB under Win64)
 begin
   dst_beg := dst;
   // 1. store in_len
-  if size>=$8000 then begin
-    pWord(dst)^ := $8000 or (size and $7fff);
-    pWord(dst+2)^ := size shr 15;
+  if size>=$8000 then begin // size in 32KB..2GB -> stored as integer
+    PWord(dst)^ := $8000 or (size and $7fff);
+    PWord(dst+2)^ := size shr 15;
     inc(dst,4);
   end else begin
-    pWord(dst)^ := size ; // src<32768 -> stored as word, otherwize as integer
+    PWord(dst)^ := size ; // size<32768 -> stored as word
     if size=0 then begin
       result := 2;
       exit;
@@ -477,17 +494,17 @@ begin
   src_endmatch := src_end-(6+5);
   CWbit := 0;
   CWpoint := pointer(dst);
-  pInteger(dst)^ := 0;
-  inc(dst,sizeof(CWpoint));
+  PCardinal(dst)^ := 0;
+  inc(dst,sizeof(CWpoint^));
   fillchar(offset,sizeof(offset),0); // fast 16KB reset to 0
   // 1. main loop to search using hash[]
   if src<=src_endmatch then
   repeat
-    v := pInteger(src)^;
+    v := PCardinal(src)^;
     h := ((v shr 12) xor v) and 4095;
     o := offset[h];
     offset[h] := src;
-    cached := v xor cache[h];
+    cached := v xor cache[h]; // o=nil if cache[h] is uninitialized
     cache[h] := v;
     if (cached and $00ffffff=0) and (o<>nil) and (src-o>2) then begin
       CWpoint^ := CWpoint^ or (1 shl CWbit);
@@ -503,11 +520,11 @@ begin
       h := h shl 4;
       // here we have always t>0
       if t<=15 then begin // mark 2 to 17 bytes -> size=1..15
-        pWord(dst)^ := integer(t or h);
+        PWord(dst)^ := integer(t or h);
         inc(dst,2);
       end else begin // mark 18 to (255+16) bytes -> size=0, next byte=t
         dec(t,16);
-        pWord(dst)^ := h; // size=0
+        PWord(dst)^ := h; // size=0
         dst[2] := ansichar(t);
         inc(dst,3);
       end;
@@ -521,8 +538,8 @@ begin
       if src<=src_endmatch then continue else break;
     end else begin
       CWpoint := pointer(dst);
-      pInteger(dst)^ := 0;
-      inc(dst,sizeof(CWpoint));
+      PCardinal(dst)^ := 0;
+      inc(dst,sizeof(CWpoint^));
       CWbit := 0;
       if src<=src_endmatch then continue else break;
     end;
@@ -537,7 +554,7 @@ begin
       inc(CWbit);
       if src<src_end then continue else break;
     end else begin
-      pInteger(dst)^ := 0;
+      PCardinal(dst)^ := 0;
       inc(dst,4);
       CWbit := 0;
       if src<src_end then continue else break;
@@ -546,11 +563,20 @@ begin
   result := dst-dst_beg;
 end;
 
+procedure movechars(s,d: PAnsiChar; t: integer);
+// fast code for unaligned and overlapping (see {$define WT}) small blocks
+// this code is sometimes used rather than system.Move() by decompress2()
+var i: integer;
+begin
+  for i := 0 to t-1 do
+    d[i] := s[i];
+end;
+
 const
   bitlut: array[0..15] of integer =
     (4, 0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0);
 
-function SynLZdecompress1b(src: PAnsiChar; size: integer; dst: PAnsiChar): Integer;
+function SynLZdecompress1b(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
 // this routine was trying to improve speed, but was slower
 var last_hashed: PAnsiChar; // initial src and dst value
     src_end: PAnsiChar;
@@ -563,25 +589,25 @@ begin
 //  dst_beg := dst;
   src_end := src+size;
   // 1. retrieve out_len
-  result := pWord(src)^;
+  result := PWord(src)^;
   if result=0 then exit;
   inc(src,2);
   if result and $8000<>0 then begin
-    result := (result and $7fff) or (integer(pWord(src)^) shl 15);
+    result := (result and $7fff) or (integer(PWord(src)^) shl 15);
     inc(src,2);
   end;
   // 2. decompress
   last_hashed := dst-1;
   CWbit := 32;
 nextCW:
-  CW := pInteger(src)^;
+  CW := PCardinal(src)^;
   inc(src,4);
   CWbit := CWbit-32;
   if src<src_end then
   repeat
     if CW and 1=0 then begin
       if CWbit<(32-4) then begin
-        pInteger(dst)^ := pInteger(src)^;
+        PCardinal(dst)^ := PCardinal(src)^;
         v := bitlut[CW and 15];
         inc(src,v);
         inc(dst,v);
@@ -590,7 +616,7 @@ nextCW:
         if src>=src_end then break;
         while last_hashed<dst-3 do begin
           inc(last_hashed);
-          v := pInteger(last_hashed)^;
+          v := PCardinal(last_hashed)^;
           offset[((v shr 12) xor v) and 4095] := last_hashed;
         end;
       end else begin
@@ -600,7 +626,7 @@ nextCW:
         if src>=src_end then break;
         if last_hashed<dst-3 then begin
           inc(last_hashed);
-          v := pInteger(last_hashed)^;
+          v := PCardinal(last_hashed)^;
           offset[((v shr 12) xor v) and 4095] := last_hashed;
         end;
         inc(CWbit);
@@ -610,7 +636,7 @@ nextCW:
           goto nextCW;
       end;
     end else begin
-      h := pWord(src)^;
+      h := PWord(src)^;
       inc(src,2);
       t := (h and 15)+2;
       h := h shr 4;
@@ -623,7 +649,7 @@ nextCW:
         move(offset[h]^,dst^,t);
       while last_hashed<dst do begin
         inc(last_hashed);
-        v := pInteger(last_hashed)^;
+        v := PCardinal(last_hashed)^;
         offset[((v shr 12) xor v) and 4095] := last_hashed;
       end;
       inc(dst,t);
@@ -640,38 +666,44 @@ nextCW:
 end;
 
 {$ifndef PUREPASCAL}
-function SynLZdecompress1asm(src: PAnsiChar; size: integer; dst: PAnsiChar): Integer;
+// using direct x86 jmp also circumvents Internal Error C11715 for Delphi 5
+function SynLZdecompress1(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
+asm
+  jmp SynLZDecompress1asm
+end;
+
+function SynLZdecompress1asm(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
 asm
         push    ebp
         push    ebx
         push    esi
-        push    edi                                    
+        push    edi
         push    eax
-        mov     eax, 4                                 
+        mov     eax, 4
 @@0906: add     esp, -4092
-        push    eax                                    
+        push    eax
         dec     eax
-        jnz     @@0906                                 
-        mov     eax, [esp+4000H]             
-        add     esp, -24                               
-        mov     esi, ecx                               
+        jnz     @@0906
+        mov     eax, [esp+4000H]
+        add     esp, -24
+        mov     esi, ecx
         mov     ebx, eax
-        mov     [esp+8H], esi                
-        add     edx, ebx                               
-        mov     [esp+10H], edx               
-        movzx   eax, word ptr [ebx]                    
-        mov     [esp], eax                   
-        or      eax,eax                     
-        je      @@0917                                 
+        mov     [esp+8H], esi
+        add     edx, ebx
+        mov     [esp+10H], edx
+        movzx   eax, word ptr [ebx]
+        mov     [esp], eax
+        or      eax,eax
+        je      @@0917
         add     ebx, 2
-        mov     eax, [esp]                   
+        mov     eax, [esp]
         test    ah, 80H
         jz      @@0907
-        and     eax, 7FFFH                             
-        movzx   edx, word ptr [ebx]                    
+        and     eax, 7FFFH
+        movzx   edx, word ptr [ebx]
         shl     edx, 15
-        or      eax, edx                               
-        mov     [esp], eax                   
+        or      eax, edx
+        mov     [esp], eax
         add     ebx, 2
 @@0907: lea     ebp, [esi-1]
 @@0908: mov     ecx, [ebx]
@@ -741,11 +773,15 @@ asm
         lea     ebp, [esi-1]
         jz      @@0908
         jmp     @@0909
-@@0913: mov     ecx, edx
-        mov     edx, esi
-        call    movechars
+@@0913: push    ebx
+        xor     ecx, ecx
+@s:     dec     edx
+        mov     bl, [eax+ecx]
+        mov     [esi+ecx], bl
+        lea     ecx,[ecx+1]
+        jnz     @s
+        pop     ebx
         jmp     @@0914
-
 @@0917: mov     eax, [esp]
         add     esp, 16412
         pop     edi
@@ -755,27 +791,31 @@ asm
 end;
 {$endif PUREPASCAL}
 
-function SynLZdecompress1pas(src: PAnsiChar; size: integer; dst: PAnsiChar): Integer;
+function SynLZdecompress1pas(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
 var last_hashed: PAnsiChar; // initial src and dst value
     src_end: PAnsiChar;
-    CWbit: integer;
-    CW, v, t, h: integer;
+    {$ifdef CPU64}
+    o: PAnsiChar;
+    i: PtrUInt;
+    {$endif}
+    CW, CWbit: integer;
+    v, t, h: PtrUInt;
     offset: array[0..4095] of PAnsiChar; // 16KB hashing code
 label nextCW;
 begin
   src_end := src+size;
   // 1. retrieve out_len
-  result := pWord(src)^;
+  result := PWord(src)^;
   if result=0 then exit;
   inc(src,2);
   if result and $8000<>0 then begin
-    result := (result and $7fff) or (integer(pWord(src)^) shl 15);
+    result := (result and $7fff) or (integer(PWord(src)^) shl 15);
     inc(src,2);
   end;
   // 2. decompress
   last_hashed := dst-1;
 nextCW:
-  CW := pInteger(src)^;
+  CW := PCardinal(src)^;
   inc(src,4);
   CWbit := 1;
   if src<src_end then
@@ -787,7 +827,7 @@ nextCW:
       if src>=src_end then break;
       if last_hashed<dst-3 then begin
         inc(last_hashed);
-        v := pInteger(last_hashed)^;
+        v := PCardinal(last_hashed)^;
         offset[((v shr 12) xor v) and 4095] := last_hashed;
       end;
       CWbit := CWbit shl 1;
@@ -795,7 +835,7 @@ nextCW:
         continue else
         goto nextCW;
     end else begin
-      h := pWord(src)^;
+      h := PWord(src)^;
       inc(src,2);
       t := (h and 15)+2;
       h := h shr 4;
@@ -803,16 +843,100 @@ nextCW:
         t := ord(src^)+(16+2);
         inc(src);
       end;
-      if dst-offset[h]<t then // avoid overlaping move() bug
+      {$ifdef CPU64}
+      o := offset[h];
+      if (t<8) or (PtrUInt(dst-o)<t) then
+        for i := 0 to t do
+          dst[i] := o[i] else
+        move(o^,dst^,t);
+      {$else}
+      if PtrUInt(dst-offset[h])<t then
         movechars(offset[h],dst,t) else
         move(offset[h]^,dst^,t);
+      {$endif}
+      if src>=src_end then break;
       while last_hashed<dst do begin
         inc(last_hashed);
-        v := pInteger(last_hashed)^;
+        v := PCardinal(last_hashed)^;
         offset[((v shr 12) xor v) and 4095] := last_hashed;
       end;
       inc(dst,t);
+      last_hashed := dst-1;
+      CWbit := CWbit shl 1;
+      if CWbit<>0 then
+        continue else
+        goto nextCW;
+    end;
+  until false;
+end;
+
+function SynLZdecompress1partial(src: PAnsiChar; size: integer; dst: PAnsiChar; maxDst: integer): integer;
+var last_hashed: PAnsiChar; // initial src and dst value
+    src_end,dst_End: PAnsiChar;
+    CWbit: integer;
+    CW, v, t, h: integer;
+    offset: array[0..4095] of PAnsiChar; // 16KB hashing code
+label nextCW;
+begin
+  src_end := src+size;
+  // 1. retrieve out_len
+  result := PWord(src)^;
+  if result=0 then exit;
+  inc(src,2);
+  if result and $8000<>0 then begin
+    result := (result and $7fff) or (integer(PWord(src)^) shl 15);
+    inc(src,2);
+  end;
+  if maxDst<result then
+    result := maxDst;
+  if result<=0 then
+    exit; // nothing to decompress
+  dst_end := dst+result; // will also avoid any buffer overflow errors
+  // 2. decompress
+  last_hashed := dst-1;
+nextCW:
+  CW := PCardinal(src)^;
+  inc(src,4);
+  CWbit := 1;
+  if src<src_end then
+  repeat
+    if CW and CWbit=0 then begin
+      dst^ := src^;
+      inc(src);
+      inc(dst);
+      if (src>=src_end) or (dst>=dst_end) then break;
+      if last_hashed<dst-3 then begin
+        inc(last_hashed);
+        v := PCardinal(last_hashed)^;
+        offset[((v shr 12) xor v) and 4095] := last_hashed;
+      end;
+      CWbit := CWbit shl 1;
+      if CWbit<>0 then
+        continue else
+        goto nextCW;
+    end else begin
+      h := PWord(src)^;
+      inc(src,2);
+      t := (h and 15)+2;
+      h := h shr 4;
+      if t=2 then begin
+        t := ord(src^)+(16+2);
+        inc(src);
+      end;
+      if dst+t>=dst_end then begin
+        movechars(offset[h],dst,dst_end-dst);
+        break;
+      end;
+      if dst-offset[h]<t then // avoid overlaping move() bug
+        movechars(offset[h],dst,t) else
+        move(offset[h]^,dst^,t);
       if src>=src_end then break;
+      while last_hashed<dst do begin
+        inc(last_hashed);
+        v := PCardinal(last_hashed)^;
+        offset[((v shr 12) xor v) and 4095] := last_hashed;
+      end;
+      inc(dst,t);
       last_hashed := dst-1;
       CWbit := CWbit shl 1;
       if CWbit<>0 then
@@ -827,9 +951,9 @@ function SynLZcompress2(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
 var dst_beg,      // initial dst value
     src_end,      // real last byte available in src
     src_endmatch, // last byte to try for hashing
-    o: pAnsiChar;
+    o: PAnsiChar;
     CWbit: byte;
-    CWpoint: PInteger;
+    CWpoint: PCardinal;
     h, v, cached: integer;
     t, tmax, tdiff, i: integer;
     offset: array[0..4095] of PAnsiChar; // 16KB+16KB=32KB hashing code
@@ -839,11 +963,11 @@ begin
   dst_beg := dst;
   // 1. store in_len
   if size>=$8000 then begin
-    pWord(dst)^ := $8000 or (size and $7fff);
-    pWord(dst+2)^ := size shr 15;
+    PWord(dst)^ := $8000 or (size and $7fff);
+    PWord(dst+2)^ := size shr 15;
     inc(dst,4);
   end else begin
-    pWord(dst)^ := size ; // src<32768 -> stored as word, otherwize as integer
+    PWord(dst)^ := size ; // src<32768 -> stored as word, otherwise as integer
     if size=0 then begin
       result := 2;
       exit;
@@ -855,14 +979,14 @@ begin
   src_endmatch := src_end-(6+5);
   CWbit := 0;
   CWpoint := pointer(dst);
-  pInteger(dst)^ := 0;
-  inc(dst,sizeof(CWpoint));
+  PCardinal(dst)^ := 0;
+  inc(dst,sizeof(CWpoint^));
   tdiff := 0;
   fillchar(offset,sizeof(offset),0); // fast 16KB reset to 0
   // 1. main loop to search using hash[]
   if src<=src_endmatch then
   repeat
-    v := pInteger(src)^;
+    v := PCardinal(src)^;
     h := ((v shr 12) xor v) and 4095;
     o := offset[h];
     offset[h] := src;
@@ -882,7 +1006,7 @@ dotdiff:v := tdiff;
               inc(src);
             end;
             CWpoint := pointer(dst);
-            pInteger(dst)^ := 0;
+            PCardinal(dst)^ := 0;
             inc(dst,4);
             CWBit := (CWBit+v) and 31;
             for i := 1 to CWBit do begin
@@ -918,7 +1042,7 @@ dotdiff:v := tdiff;
           if CWBit<31 then
             inc(CWBit) else begin
             CWpoint := pointer(dst);
-            pInteger(dst)^ := 0;
+            PCardinal(dst)^ := 0;
             inc(dst,4);
             CWbit := 0;
           end;
@@ -927,7 +1051,7 @@ dotdiff:v := tdiff;
             goto dotdiff;
         end;
       end;
-//      assert(pWord(o)^=pWord(src)^);
+//      assert(PWord(o)^=PWord(src)^);
       tdiff := 0;
       CWpoint^ := CWpoint^ or (1 shl CWbit);
       inc(src,2);
@@ -943,11 +1067,11 @@ dotdiff:v := tdiff;
 //      assert(t>0);
       // here we have always t>0
       if t<15 then begin // store t=1..14 -> size=t=1..14
-        pWord(dst)^ := integer(t or h);
+        PWord(dst)^ := integer(t or h);
         inc(dst,2);
       end else begin // store t=15..255+15 -> size=0, next byte=matchlen-15-2
         dst[2] := ansichar(t-15);
-        pWord(dst)^ := h; // size=0
+        PWord(dst)^ := h; // size=0
         inc(dst,3);
       end;
       if CWbit<31 then begin
@@ -955,7 +1079,7 @@ dotdiff:v := tdiff;
         if src<=src_endmatch then continue else break;
       end else begin
         CWpoint := pointer(dst);
-        pInteger(dst)^ := 0;
+        PCardinal(dst)^ := 0;
         inc(dst,4);
         CWbit := 0;
         if src<=src_endmatch then continue else break;
@@ -977,7 +1101,7 @@ dotdiff:v := tdiff;
       inc(CWbit);
       if src<src_end then continue else break;
     end else begin
-      pInteger(dst)^ := 0;
+      PCardinal(dst)^ := 0;
       inc(dst,4);
       CWbit := 0;
       if src<src_end then continue else break;
@@ -986,31 +1110,33 @@ dotdiff:v := tdiff;
   result := dst-dst_beg;
 end;
 
-function SynLZdecompress2(src: PAnsiChar; size: integer; dst: PAnsiChar): Integer;
-var dst_beg, last_hashed: PAnsiChar; // initial src and dst value
+function SynLZdecompress2(src: PAnsiChar; size: integer; dst: PAnsiChar): integer;
+var {$ifopt C+}dst_beg,{$endif} last_hashed: PAnsiChar; // initial src and dst value
     src_end: PAnsiChar;
     CWbit: integer;
     CW, v, t, h, i: integer;
     offset: array[0..4095] of PAnsiChar; // 16KB hashing code
 label nextCW;
 begin
+  {$ifopt C+}
   dst_beg := dst;
+  {$endif}
   src_end := src+size;
   {$ifndef CPU64}
   t := 0; // make compiler happy
   {$endif}
   // 1. retrieve out_len
-  result := pWord(src)^;
+  result := PWord(src)^;
   if result=0 then exit;
   inc(src,2);
   if result and $8000<>0 then begin
-    result := (result and $7fff) or (integer(pWord(src)^) shl 15);
+    result := (result and $7fff) or (integer(PWord(src)^) shl 15);
     inc(src,2);
   end;
   // 2. decompress
   last_hashed := dst-1;
 nextCW:
-  CW := pInteger(src)^;
+  CW := PCardinal(src)^;
   inc(src,4);
   CWbit := 1;
   if src<src_end then
@@ -1022,7 +1148,7 @@ nextCW:
       if src>=src_end then break;
       if last_hashed<dst-3 then begin
         inc(last_hashed);
-        v := pInteger(last_hashed)^;
+        v := PCardinal(last_hashed)^;
         offset[((v shr 12) xor v) and 4095] := last_hashed;
       end;
       CWbit := CWbit shl 1;
@@ -1032,7 +1158,7 @@ nextCW:
     end else begin
       case ord(src^) and 15 of // get size
       0: begin // size=0 -> next byte=matchlen-15-2
-        h := pWord(src)^ shr 4;
+        h := PWord(src)^ shr 4;
         t := ord(src[2])+(15+2);
         inc(src,3);
         if dst-offset[h]<t then
@@ -1049,7 +1175,7 @@ nextCW:
         if src>=src_end then break;
         while last_hashed<dst-3 do begin
           inc(last_hashed);
-          v := pInteger(last_hashed)^;
+          v := PCardinal(last_hashed)^;
           offset[((v shr 12) xor v) and 4095] := last_hashed;
         end;
         CWbit := CWbit shl 1;
@@ -1058,7 +1184,7 @@ nextCW:
           goto nextCW;
       end;
       else begin // size=1..14=matchlen-2
-        h := pWord(src)^;
+        h := PWord(src)^;
         inc(src,2);
         t := (h and 15)+2;
         h := h shr 4;
@@ -1069,7 +1195,7 @@ nextCW:
       end;
       while last_hashed<dst do begin
         inc(last_hashed);
-        v := pInteger(last_hashed)^;
+        v := PCardinal(last_hashed)^;
         offset[((v shr 12) xor v) and 4095] := last_hashed;
       end;
       inc(dst,t);
@@ -1081,7 +1207,9 @@ nextCW:
         goto nextCW;
     end;
   until false;
+  {$ifopt C+}
   assert(result=dst-dst_beg);
+  {$endif}
 end;
 
 function Hash32(P: PIntegerArray; L: integer): cardinal;
@@ -1101,12 +1229,12 @@ begin
       inc(s2,s1);
       inc(s1,P^[3]);
       inc(s2,s1);
-      inc(PtrUInt(P),16);
+      inc(PByte(P),16);
     end;
     for i := 1 to (L shr 2)and 3 do begin // 4 bytes (DWORD) by loop
       inc(s1,P^[0]);
       inc(s2,s1);
-      inc(PtrUInt(P),4);
+      inc(PInteger(P));
     end;
     case L and 3 of // remaining 0..3 bytes
     1: inc(s1,PByte(P)^);
@@ -1117,44 +1245,6 @@ begin
     result := s1 xor (s2 shl 16);
   end else
     result := 0;
-end;
-
-function CompressSynLZ(var Data: RawByteString; Compress: boolean): RawByteString;
-var DataLen, len: integer;
-    P: PAnsiChar;
-begin
-  DataLen := length(Data);
-  if DataLen<>0 then // '' is compressed and uncompressed to ''
-  if Compress then begin
-    len := SynLZcompressdestlen(DataLen)+8;
-    SetString(result,nil,len);
-    P := pointer(result);
-    PCardinal(P)^ := Hash32(pointer(Data),DataLen);
-{$ifdef PUREPASCAL}
-    len := SynLZcompress1pas(pointer(Data),DataLen,P+8); {$else}
-    len := SynLZcompress1asm(pointer(Data),DataLen,P+8);
-{$endif}
-    PCardinal(P+4)^ := Hash32(pointer(P+8),len);
-    SetString(Data,P,len+8);
-  end else begin
-    result := '';
-    P := pointer(Data);
-    if (DataLen<=8) or (Hash32(pointer(P+8),DataLen-8)<>PCardinal(P+4)^) then
-      exit;
-    len := SynLZdecompressdestlen(P+8);
-    SetLength(result,len);
-    if (len<>0) and
-{$ifdef PUREPASCAL}
-        ((SynLZdecompress1pas(P+8,DataLen-8,pointer(result))<>len) or
-{$else} ((SynLZdecompress1asm(P+8,DataLen-8,pointer(result))<>len) or
-{$endif}
-       (Hash32(pointer(result),len)<>PCardinal(P)^)) then begin
-      result := '';
-      exit;
-    end else 
-      SetString(Data,PAnsiChar(pointer(result)),len);
-  end;
-  result := 'synlz';
 end;
 
 

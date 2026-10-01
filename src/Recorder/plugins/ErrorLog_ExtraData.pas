@@ -15,7 +15,7 @@ Procedure Errorlog_Thunk1;
 
 implementation
 uses
-  Windows, Tlhelp32,
+  Windows,
   SysUtils,
   Contnrs,
   Classes,
@@ -66,6 +66,32 @@ type
 
     Constructor Create(aname, aimagepath: String; abasePTR: Pointer; asize: LongWord);
   end;
+
+const
+  TH32CS_SNAPMODULE = $00000008;
+
+type
+  PMODULEENTRY32 = ^MODULEENTRY32;
+  MODULEENTRY32 = packed record
+    dwSize: DWORD;
+    th32ModuleID: DWORD;
+    th32ProcessID: DWORD;
+    GlblcntUsage: DWORD;
+    ProccntUsage: DWORD;
+    modBaseAddr: PByte;
+    modBaseSize: DWORD;
+    hModule: HMODULE;
+    szModule: array[0..255] of AnsiChar;
+    szExePath: array[0..MAX_PATH-1] of AnsiChar;
+  end;
+  TModuleEntry32 = MODULEENTRY32;
+
+function CreateToolhelp32Snapshot(dwFlags, th32ProcessID: DWORD): THandle; stdcall;
+  external 'kernel32.dll' name 'CreateToolhelp32Snapshot';
+function Module32First(hSnapshot: THandle; var lpme: MODULEENTRY32): BOOL; stdcall;
+  external 'kernel32.dll' name 'Module32First';
+function Module32Next(hSnapshot: THandle; var lpme: MODULEENTRY32): BOOL; stdcall;
+  external 'kernel32.dll' name 'Module32Next';
 
 Constructor TModuleInfo.Create(aname, aimagepath: String; abasePTR: Pointer; asize: LongWord);
 begin

@@ -79,21 +79,11 @@ function DllGetClassObject :HResult; stdcall;
 function DirectPlayLobbyCreate(lpguidSP: PGUID; var lplpDPL:
     IDirectPlayLobby; lpUnk: IUnknown; lpData: Pointer; dwDataSize: DWORD) :
     HResult; stdcall;
-    
-exports
-   DirectPlayCreate index 1,
-   DirectPlayEnumerateA index 2,
-   DirectPlayEnumerateW index 3,
-   DirectPlayLobbyCreateA	index 4,
-   DirectPlayLobbyCreateW index 5,
-   gdwDPlaySPRefCount	index 6,
-   DirectPlayEnumerate index 9,
-   DllCanUnloadNow index 10,
-   DllGetClassObject index 11;
+implementation    
 {$ENDIF}
 // --------------------------------------------------------------------
    
-implementation
+
 uses
   sysutils,
   DPLobbyWrapper,

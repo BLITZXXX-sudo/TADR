@@ -29,7 +29,7 @@ uses
 procedure BroadcastNanolatheParticles(PosStart: PPosition;
   PosTarget: PNanolathePos; Reverse: Integer); stdcall;
 begin
-  if TAData.NetworkLayerEnabled then
+  if TAData.NetworkLayerEnabled and Assigned(GlobalDPlay) then
     GlobalDPlay.Broadcast_SetNanolatheParticles(PosStart^, PosTarget^, Reverse);
 end;
 

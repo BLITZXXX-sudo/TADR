@@ -162,7 +162,7 @@
   Commands.AddCommand( 'sharemappos', 'Allows your allies to see where you are looking on the main game screen, indicated by a rectangle in the respective player''s color. ',
               '',0,
               [InGame], False, True, False, False, OnSharemappos);
-  Commands.AddCommand( 'record', 'Records the game for later Perusing Pleasure™. By default the recorded game will end up in your TA directory, however this can be changed by '+
+  Commands.AddCommand( 'record', 'Records the game for later Perusing Pleasureï¿½. By default the recorded game will end up in your TA directory, however this can be changed by '+
                         'the control panel''s Default TA Demo directory (3.) setting. If a recording with the same name already exists, it will be overwritten. ',
               'filename',0,
               [InBattleRoom,InGame], False, True, False, False, OnRecord);
