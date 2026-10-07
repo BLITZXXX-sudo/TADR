@@ -1,0 +1,98 @@
+name: tplayx 2.0 build
+
+# Builds tplayx.dll (Free Pascal 3.2.2, i386-win32, same options as the
+# lpi's default release mode) on every push to the tplayx-2.0 branch.
+# Pushing a tag named tplayx-v* also publishes a GitHub Release with the DLL.
+on:
+  push:
+    branches: [tplayx-2.0]
+    tags: ['tplayx-v*']
+    paths:
+      - 'tplayx 2.0/**'
+      - '.github/workflows/tplayx-2.0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FPC_VERSION: 3.2.2
+  FPC_DIR: C:\fpc
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Free Pascal
+        id: fpc-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.FPC_DIR }}
+          key: fpc-${{ env.FPC_VERSION }}-i386-win32-v1
+
+      - name: Install Free Pascal ${{ env.FPC_VERSION }} (i386-win32)
+        if: steps.fpc-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://downloads.sourceforge.net/project/freepascal/Win32/$env:FPC_VERSION/fpc-$env:FPC_VERSION.i386-win32.exe"
+          curl.exe -fL --retry 5 --retry-delay 5 -o fpc-setup.exe $url
+          if ($LASTEXITCODE -ne 0) { throw "download failed: $url" }
+          $p = Start-Process .\fpc-setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$env:FPC_DIR" -Wait -PassThru
+          "installer exit code: $($p.ExitCode)"
+
+      - name: Locate compiler
+        id: fpc
+        shell: pwsh
+        run: |
+          $fpc = Get-ChildItem $env:FPC_DIR -Recurse -Filter fpc.exe | Where-Object FullName -match 'i386-win32' | Select-Object -First 1
+          if (-not $fpc) { Get-ChildItem $env:FPC_DIR -Recurse -Depth 3 | Select-Object -First 50 FullName; throw 'fpc.exe not found' }
+          $bin = $fpc.DirectoryName
+          if (-not (Test-Path "$bin\fpc.cfg")) {
+            & "$bin\fpcmkcfg.exe" -d "basepath=$env:FPC_DIR" -o "$bin\fpc.cfg"
+          }
+          & $fpc.FullName -iV
+          "path=$($fpc.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Build tplayx.dll
+        shell: pwsh
+        working-directory: tplayx 2.0/src/Recorder
+        run: |
+          New-Item -ItemType Directory -Force lib | Out-Null
+          $fpcArgs = @('-B','-MDelphi','-Twin32','-Pi386','-O-','-Os','-WR',
+                    '-Xm','-Xs','-XX','-CX',
+                    '-FuTAMem','-Fuplugins','-Fupackets','-FunetmsgHandling','-Fu..','-Fu..\3rdparty',
+                    '-FiTAMem','-Fiplugins','-Fi..','-Fi..\3rdparty',
+                    '-FUlib','-FE.','-vewn','tplayx.dpr')
+          & "${{ steps.fpc.outputs.path }}" @fpcArgs 2>&1 | Tee-Object build.log | Select-String -Pattern 'Error:|Fatal:|Linking|lines compiled'
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path tplayx.dll)) { Get-Content build.log -Tail 40; throw 'build failed' }
+          $w = (Select-String build.log -Pattern ' Warning: ').Count
+          "tplayx.dll: {0:N0} bytes, {1} warning(s)" -f (Get-Item tplayx.dll).Length, $w
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item 'tplayx 2.0/src/Recorder/tplayx.dll','tplayx 2.0/src/Recorder/tplayx.map' dist/
+          Compress-Archive -Path dist/* -DestinationPath tplayx-dll.zip -Force
+          Get-FileHash dist/tplayx.dll -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  tplayx.dll" } | Set-Content dist/SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tplayx-${{ github.sha }}
+          path: |
+            dist/tplayx.dll
+            dist/tplayx.map
+            dist/SHA256.txt
+
+      - name: Publish release (tags tplayx-v*)
+        if: startsWith(github.ref, 'refs/tags/tplayx-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          gh release create $tag dist/tplayx.dll dist/tplayx.map dist/SHA256.txt tplayx-dll.zip `
+            --repo '${{ github.repository }}' --title "tplayx 2.0 ($tag)" --target '${{ github.sha }}' `
+            --notes "tplayx.dll built by GitHub Actions from commit ${{ github.sha }} (FPC $env:FPC_VERSION, i386-win32, stripped + smart-linked). Copy tplayx.dll next to TotalA.exe."
