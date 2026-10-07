@@ -1,0 +1,2 @@
+{$MINENUMSIZE 4}
+{$ALIGN ON}

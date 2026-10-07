@@ -1,0 +1,13 @@
+lib/
+*.o
+*.ppu
+*.compiled
+*.dll
+*.map
+*.dbg
+*.lps
+*.bak
+backup/
+_build/
+*.log
+*.lps
