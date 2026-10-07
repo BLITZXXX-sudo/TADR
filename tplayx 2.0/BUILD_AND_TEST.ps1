@@ -65,6 +65,11 @@ if (Get-Process TotalA -ErrorAction SilentlyContinue) {
   Fail 'TotalA.exe is running - close the game first (the DLL is locked while it runs)'; Finish
 }
 
+# lazbuild rewrites tplayx.res (version info) and tplayx.lpi (build number)
+# on every build - a copy unpacked from an archive can arrive read-only.
+$ro = Get-ChildItem (Join-Path $PSScriptRoot 'src') -Recurse -File -ErrorAction SilentlyContinue | Where-Object IsReadOnly
+if ($ro) { $ro | ForEach-Object { $_.IsReadOnly = $false }; Say "Cleared read-only flag on $(@($ro).Count) file(s)" 'Yellow' }
+
 # ---------------------------------------------------------------- 1. build
 Say '--- 1. lazbuild --build-all ---' 'Cyan'
 Push-Location $ProjectDir
