@@ -1,15 +1,16 @@
 name: tplayx 2.0 build
 
 # Builds tplayx.dll (Free Pascal 3.2.2, i386-win32, same options as the
-# lpi's default release mode) on every push to the tplayx-2.0 branch.
+# lpi's default release mode) whenever 'tplayx 2.0/' changes on master.
 # Pushing a tag named tplayx-v* also publishes a GitHub Release with the DLL.
+# Actions tab -> "tplayx 2.0 build" -> Run workflow builds it on demand.
 on:
   push:
-    branches: [tplayx-2.0]
+    branches: [master]
     tags: ['tplayx-v*']
     paths:
       - 'tplayx 2.0/**'
-      - '.github/workflows/tplayx-2.0.yml'
+      - '.github/workflows/main.yml'
   workflow_dispatch:
 
 permissions:
