@@ -30,6 +30,7 @@ param(
   [string]$GameArgs   = '',            # '' = fullscreen (needed for the tdraw Wind/Tidal/Game Time bar); '-d' = old windowed mode
   [int]   $RunSeconds = 25,
   [switch]$Strict,
+  [switch]$Debug,         # big DLL with DWARF debug info (build mode 'Debug'); default = small release DLL
   [switch]$NoLaunch,
   [switch]$KeepRunning,
   [switch]$UpdateBaseline
@@ -71,10 +72,11 @@ $ro = Get-ChildItem (Join-Path $PSScriptRoot 'src') -Recurse -File -ErrorAction 
 if ($ro) { $ro | ForEach-Object { $_.IsReadOnly = $false }; Say "Cleared read-only flag on $(@($ro).Count) file(s)" 'Yellow' }
 
 # ---------------------------------------------------------------- 1. build
-Say '--- 1. lazbuild --build-all ---' 'Cyan'
+$modeArgs = if ($Debug) { @('--build-mode=Debug') } else { @() }
+Say "--- 1. lazbuild --build-all $(if ($Debug) {'(Debug)'} else {'(Release: stripped + smart-linked)'}) ---" 'Cyan'
 Push-Location $ProjectDir
 try {
-  & $LazBuild --build-all tplayx.lpi *> $buildLog
+  & $LazBuild --build-all @modeArgs tplayx.lpi *> $buildLog
   $lazExit = $LASTEXITCODE
 } finally { Pop-Location }
 $lines = Get-Content $buildLog
