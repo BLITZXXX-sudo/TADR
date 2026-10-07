@@ -12,6 +12,5 @@ Output: `src\Recorder\tplayx.dll`. Copy it next to `TotalA.exe`.
 
 ## Notes
 
-- Comments were removed from the project's own units. Third-party units keep their original headers and licences:
-  `DPlay.pas`, `DPLobby.pas` (DirectX headers), `SynCommons.pas`, `SynLZ.pas`, `SynFPCTypInfo.pas`, `Synopse.inc`, `SynopseCommit.inc` (Synopse mORMot), `src/3rdparty/gphugef.pas` (GpHugeFile).
-- The top-bar Wind / Tidal / Game Time display is drawn by tdraw.dll 2025.8.29 (fullscreen), not by tplayx.
+auto transports
+cloak generator 
