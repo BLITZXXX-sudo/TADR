@@ -2958,7 +2958,7 @@ begin
           end;
       end;
 
-      if (fakewatch and FromPlayer.IsSelf) then
+      if fakewatch and (FromPlayer <> nil) and FromPlayer.IsSelf then
       begin
 
         if Longword(timeGetTime - starttime) > 5000 then
@@ -2975,7 +2975,7 @@ begin
       Result := Result + tmp;
     until s = '';
 
-    if IsRecording then
+    if IsRecording and (FromPlayer <> nil) then
     begin
       if shareMapPos and (chatview <> nil) and
          ( (chatview^.mapX <> OldMapX) or (chatview^.mapY <> OldMapY) ) then
@@ -2998,9 +2998,10 @@ begin
         end;
       end;
 
-      assert(FromPlayer <> nil);
-      assert(ToPlayer <> nil);
-      c := SmartPak( c, FromPlayer.Name, ToPlayer.Name );
+      if ToPlayer = nil then
+        c := SmartPak( c, FromPlayer.Name, '' )
+      else
+        c := SmartPak( c, FromPlayer.Name, ToPlayer.Name );
       if length(c)>1 then
       begin
         SetLength( s, 5 );
@@ -3383,6 +3384,7 @@ try
         end
       else
         begin
+        bogustill := lpidTo;
         s := PtrToStr (lpdata, lpdwDataSize);
         if UseCompression then
           try
@@ -3418,7 +3420,7 @@ try
           end;
         end;
       end
-    else if (Result <> DPERR_NOMESSAGES) then
+    else if (Result <> DPERR_NOMESSAGES) and (Result <> DPERR_BUFFERTOOSMALL) then
       TLog.add(2, 'In TDPlay.Receive: '+ErrorString( result ) );
 except
   on E: Exception do
