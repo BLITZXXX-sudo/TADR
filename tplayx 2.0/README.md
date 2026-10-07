@@ -18,3 +18,5 @@ Build modes:
 
 auto transports
 cloak generator 
+
+Any confilts with tdraw please let me know so we can fix this 
