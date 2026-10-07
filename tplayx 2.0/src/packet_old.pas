@@ -332,6 +332,7 @@ for i := 4 to Length (Data) - 3 do
   Data [i] := Char(Byte(Data[i]) xor (i - 1));
   Check := Check + Byte(Data[i]);
   end;
+UniqueString(data);
 p := @data[2];
 p^ := check;
 

@@ -1045,14 +1045,14 @@ for a := 1 to basecount do
   begin
   curbuilding:=a+player.Side*basecount;
   holdstring:=#9+'F'+#$00+'12'+#0#0#$20#$07#$00#$00#$02#$00#$00#$00#$10#$04#$00#$00#$E9+'t'+#$00#$00;
-  setword(@holdstring[2],initbase[curbuilding].buildid);
+  setword(StrPtr(holdstring, 2),initbase[curbuilding].buildid);
   if player.IsSelf then
-    setword(@holdstring[4],Players[2].StartInfo.ID+maxunits-1)
+    setword(StrPtr(holdstring, 4),Players[2].StartInfo.ID+maxunits-1)
   else
-    setword(@holdstring[4],Players[1].StartInfo.ID+maxunits-1);
-  setword(@holdstring[8],player.StartInfo.X +initbase[curbuilding].posx);
-  setword(@holdstring[12],player.StartInfo.Z );
-  setword(@holdstring[16],player.StartInfo.Y +initbase[curbuilding].posy);
+    setword(StrPtr(holdstring, 4),Players[1].StartInfo.ID+maxunits-1);
+  setword(StrPtr(holdstring, 8),player.StartInfo.X +initbase[curbuilding].posx);
+  setword(StrPtr(holdstring, 12),player.StartInfo.Z );
+  setword(StrPtr(holdstring, 16),player.StartInfo.Y +initbase[curbuilding].posy);
   if (player.StartInfo.X+initbase[curbuilding].posx>0) and
      (player.StartInfo.Y+initbase[curbuilding].posy>0) then
     begin
@@ -1064,27 +1064,27 @@ for a := 1 to basecount do
     holdstring:=#$11#$05#$00#$01;
     if player.IsSelf then
       begin
-      setword(@holdstring[2],Players[2].StartInfo.ID+maxunits-1);
+      setword(StrPtr(holdstring, 2),Players[2].StartInfo.ID+maxunits-1);
       SendLocal( holdstring, 0, true, false);
       end
     else
       begin
-      setword(@holdstring[2],Players[1].StartInfo.ID+maxunits-1);
+      setword(StrPtr(holdstring, 2),Players[1].StartInfo.ID+maxunits-1);
       SendLocal( holdstring, till, false, true);
       end;
 
     holdstring:=#$14+'123456'+#$00#$00#$00#$00+'F'+#$01#$00#$00#$00#$00+'d'+#$7E#$00#$00#$00#$00#$00;
-    setword(@holdstring[12],initbase[curbuilding].hp);
+    setword(StrPtr(holdstring, 12),initbase[curbuilding].hp);
     if player.IsSelf then
       begin
-      setword(@holdstring[2],Players[2].StartInfo.ID+maxunits-1);
-      setlongword(@holdstring[4],Players[1].Id);
+      setword(StrPtr(holdstring, 2),Players[2].StartInfo.ID+maxunits-1);
+      setlongword(StrPtr(holdstring, 4),Players[1].Id);
       SendLocal( holdstring, 0, true, false)
       end
     else
       begin
-      setword(@holdstring[2],Players[1].StartInfo.ID+maxunits-1);
-      setlongword(@holdstring[4],till);
+      setword(StrPtr(holdstring, 2),Players[1].StartInfo.ID+maxunits-1);
+      setlongword(StrPtr(holdstring, 4),till);
       SendLocal( holdstring, till, false, true);
       end;
 
@@ -1097,7 +1097,7 @@ var
   cpoint       :^integer;
   s2           :string;
 begin
-  cpoint:=@s[5];
+  cpoint:=StrPtr(s, 5);
   s2:='Version '+inttostr(integer(s[2]))+'.'+inttostr(integer(s[3]));
   s2:=s2+'.'+inttostr(integer(s[4]))+' Checksum '+inttostr(cpoint^);
   SendChat(s2);
@@ -1388,9 +1388,9 @@ end;
   s:=#0#0#0#0#0#0;
 
   if IniSettings.modid > 0 then
-    setLongword (@s[3], 5 + Players.Count)
+    setLongword (StrPtr(s, 3), 5 + Players.Count)
   else
-    setLongword (@s[3], 4 + Players.Count);
+    setLongword (StrPtr(s, 3), 4 + Players.Count);
   s[1] :=char(length(s) and $ff);
   s[2] :=char(length(s) shr 8);
   logsave.add(s);
@@ -1473,7 +1473,7 @@ end;
   s:=s+unitdata;
 
   crc := #$1a + #$9 + '    ' + #$ff#$ff#$ff#$ff + #$01#$00#$00#$00;
-  setLongword (@crc[3], logsave.crc);
+  setLongword (StrPtr(crc, 3), logsave.crc);
   s := s + crc;
 
   logsave.docrc := false;
@@ -1572,7 +1572,7 @@ if (Players.Convert(from, ZI_HostPlayer ,false) <> nil) and (Players.Convert(til
 
     if (s[2] = #$3) and (s[11] = #$01) then
       begin
-      b := @s[7];
+      b := StrPtr(s, 7);
       notai := false;
       case b^ of
         $6da73737 :ai := 'BAI';
@@ -1937,10 +1937,10 @@ begin
           begin
             handleunitdata(s, FromPlayerDPID, ToPlayerDPID);
 
-            currnr := @s[7];
+            currnr := StrPtr(s, 7);
             if currnr^ = SY_UNIT then
             begin
-              currnr := @tmp[11];
+              currnr := StrPtr(tmp, 11);
               if s[2] = #$2 then
               begin
                 currnr^ := Random(400000000);
@@ -1950,11 +1950,11 @@ begin
           end;
         TANM_Ping :
           begin
-            ip := @s[6];
+            ip := StrPtr(s, 6);
             a := ip^;
             if a<>0 then
             begin
-              ip := @s[2];
+              ip := StrPtr(s, 2);
               a := ip^;
               if ((a>0) and (a<101)) then
                 Sentpings[a] := timeGetTime;
@@ -2394,8 +2394,8 @@ begin
                   begin
 
                     s2 := #$F9 + '####' + '>>>>' + Copy (tmp, 2, 100);
-                    Setlongword (@s2[2], FromPlayerDPID);
-                    Setlongword (@s2[6], ToPlayerDPID);
+                    Setlongword (StrPtr(s2, 2), FromPlayerDPID);
+                    Setlongword (StrPtr(s2, 6), ToPlayerDPID);
                     SendLocal( s2, Players[w].ID, false, true);
                   end;
                 end;
@@ -2414,11 +2414,11 @@ begin
         TANM_UnitBuildStarted :
           begin
 
-            pw:=@tmp[2];
+            pw:=StrPtr(tmp, 2);
             w:=pw^;
             w2:=w;
             Assert( (Integer(w) >= Low(UnitStatus)) and ( w <= High(UnitStatus) ) );
-            pw:=@tmp[4];
+            pw:=StrPtr(tmp, 4);
             w:=pw^;
             if statslog <> nil then
               statslog.NewUnit_StatEvent(FromPlayer.PlayerIndex,w,w2,TAData.GameTime);
@@ -2434,14 +2434,14 @@ begin
             if w-FromPlayer.StartInfo.ID=2 then
             begin
 
-              pw:=@tmp[8];
+              pw:=StrPtr(tmp, 8);
               FromPlayer.StartInfo.X:=pw^;
-              pw:=@tmp[12];
+              pw:=StrPtr(tmp, 12);
               FromPlayer.StartInfo.Z:=pw^;
-              pw:=@tmp[16];
+              pw:=StrPtr(tmp, 16);
               FromPlayer.StartInfo.Y:=pw^;
 
-              pw:=@tmp[2];
+              pw:=StrPtr(tmp, 2);
               w:=pw^;
             end;
 
@@ -2529,7 +2529,7 @@ begin
           end;
         TANM_UnitStatAndMove :
           begin
-            currnr := @tmp[4];
+            currnr := StrPtr(tmp, 4);
             FromPlayer.LastTimeStamp := currnr^;
 
             if FromPlayer.StartInfo.ID <> High(longword) then
@@ -2545,7 +2545,7 @@ begin
                 end;
               end;
 
-              pw := @tmp[8];
+              pw := StrPtr(tmp, 8);
               if (pw^ = $ffff) and (Length (tmp) > 13) then
               begin
                 if not UnitStatus[a].UnitAlive then
@@ -2590,7 +2590,7 @@ begin
           end;
         TANM_UnitBuildFinished :
           begin
-            pw:=@tmp[2];
+            pw:=StrPtr(tmp, 2);
             w:=pw^;
             if statslog <> nil then
               statslog.UnitFinished_StatEvent(FromPlayer.PlayerIndex,w,TAData.GameTime);
@@ -2599,11 +2599,11 @@ begin
           end;
         TANM_UnitKilled :
           begin
-            pw:=@tmp[2];
+            pw:=StrPtr(tmp, 2);
             w:=pw^;
             if statslog <> nil then
             begin
-              pw:=@tmp[8];
+              pw:=StrPtr(tmp, 8);
               w2:=pw^;
               statslog.Kill_StatEvent(w,w2,TAData.GameTime);
             end;
@@ -2618,11 +2618,11 @@ begin
           begin
             if statslog <> nil then
             begin
-              pw:=@tmp[2];
+              pw:=StrPtr(tmp, 2);
               w:=pw^;
-              pw:=@tmp[4];
+              pw:=StrPtr(tmp, 4);
               w2:=pw^;
-              pw:=@tmp[6];
+              pw:=StrPtr(tmp, 6);
               w3:=pw^;
               statslog.Damage_StatEvent(w,w2,w3,Byte(tmp[9]),TAData.GameTime);
             end;
@@ -2633,9 +2633,9 @@ begin
             if (statslog <> nil) and
                not FromPlayer.IsSelf then
             begin
-              pw:=@tmp[3];
+              pw:=StrPtr(tmp, 3);
               w:=pw^;
-              pw:=@tmp[5];
+              pw:=StrPtr(tmp, 5);
               w2:=pw^;
               statslog.FeatureDestroyed_StatEvent(FromPlayer.PlayerIndex,Byte(tmp[2]),w,w2,nil,TAData.GameTime);
             end;
@@ -2686,7 +2686,7 @@ begin
             a:=FromPlayer.LastTimeStamp-FromPlayer.Economy.LastTimeStamp;
             if a<180 then
               a:=120;
-            pf:=@tmp[47];
+            pf:=StrPtr(tmp, 47);
             f:=pf^;
             f3:=(f-FromPlayer.Economy.LastTotalMetal);
             if f3>0 then
@@ -2696,7 +2696,7 @@ begin
               FromPlayer.Economy.IncomeMetal := f3 / a*30;
               FromPlayer.Economy.LastTotalMetal := f;
             end;
-            pf:=@tmp[35];
+            pf:=StrPtr(tmp, 35);
             f:=pf^;
             f3:=(f-FromPlayer.Economy.LastTotalEnergy);
             if f3>0 then
@@ -2707,13 +2707,13 @@ begin
               FromPlayer.Economy.LastTotalEnergy := f;
             end;
             FromPlayer.Economy.LastTimeStamp := FromPlayer.LastTimeStamp;
-            pf:=@tmp[19];
+            pf:=StrPtr(tmp, 19);
             f:=pf^;
-            pf:=@tmp[23];
+            pf:=StrPtr(tmp, 23);
             f2:=pf^;
-            pf:=@tmp[27];
+            pf:=StrPtr(tmp, 27);
             f3:=pf^;
-            pf:=@tmp[31];
+            pf:=StrPtr(tmp, 31);
             f4:=pf^;
             b:=a;
             if assigned(chatview) and ( (FromPlayer.PlayerIndex >= 1) and
@@ -2742,7 +2742,7 @@ begin
           begin
             ResourcesSent := True;
 
-            pf:=@tmp[14];
+            pf:=StrPtr(tmp, 14);
             f:=pf^;
             if tmp[2]=#2 then
             begin
@@ -2755,9 +2755,9 @@ begin
             end;
             if statslog <> nil then
             begin
-              plw:=@tmp[6];
+              plw:=StrPtr(tmp, 6);
               lw:=plw^;
-              plw:=@tmp[10];
+              plw:=StrPtr(tmp, 10);
               lw2:=plw^;
               statslog.ResourcesShare_StatEvent(TAPlayer.GetPlayerByDPID(lw),
                                                 TAPlayer.GetPlayerByDPID(lw2), f, Byte(tmp[2]),
@@ -2947,12 +2947,12 @@ begin
       begin
         if tmp[1] = #$12 then
         begin
-          pw := @tmp[2];
+          pw := StrPtr(tmp, 2);
           dtfix := pw^;
         end else
           if (tmp[1]=#$0c) and (dtfix<>0) then
           begin
-            pw := @tmp[2];
+            pw := StrPtr(tmp, 2);
             if dtfix = pw^ then
               RequireGuarantiedMsgDelivery := true;
           end;
@@ -3299,14 +3299,14 @@ try
         lpidFrom := Players[i].ID;
 
         holdstring := '123456';
-        wp := @holdstring[1];
+        wp := StrPtr(holdstring, 1);
         w := Players[i].TakeUnit + Players[i].StartInfo.ID;
         wp^ := w;
-        ip := @holdstring[3];
+        ip := StrPtr(holdstring, 3);
         ip^ := Players[1].Id;
         holdstring:=#$14+holdstring+#$00#$00#$00#$00+'F'+#$01#$00#$00#$00#$00+'d'+#$7F#$00#$00#$00#$00#$00;
         Assert( (integer(w)-1 >= Low(UnitStatus)) and ( (w-1) <= High(UnitStatus) ) );
-        setword(@holdstring[12], UnitStatus[w - 1].health);
+        setword(StrPtr(holdstring, 12), UnitStatus[w - 1].health);
 
         if UnitStatus[w - 1].DoneStatus = 0 then
           SendLocal( holdstring, 0, true, false);
@@ -3315,7 +3315,7 @@ try
           begin
           TLog.add(2,'rejecting');
           holdstring:='1234'+#$06;
-          ip:=@holdstring[1];
+          ip:=StrPtr(holdstring, 1);
           ip^ := Players[i].ID;
           holdstring:=#$1b+holdstring;
           sendlocal(holdstring,0,false,true);

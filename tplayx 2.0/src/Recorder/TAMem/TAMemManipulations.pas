@@ -35,6 +35,7 @@ procedure SetByte( p : longword; data : Byte ); overload;
 procedure SetWord( p : pointer; data : Word ); overload;
 procedure SetWord( p : longword; data : Word ); overload;
 procedure SetLongword( p : pointer; data : longword); overload;
+function StrPtr( var s : string; index : integer) : pointer;
 procedure SetLongword( p : longword; data : longword); overload;
 
 procedure CheckForCheats(CheatType: TCheatType);
@@ -109,6 +110,12 @@ end;
 procedure SetWord( p : longword; data : Word );
 begin
 PWord(p)^ := data;
+end;
+
+function StrPtr( var s : string; index : integer) : pointer;
+begin
+UniqueString(s);
+Result := @s[index];
 end;
 
 procedure SetLongword( p : pointer; data : longword);
