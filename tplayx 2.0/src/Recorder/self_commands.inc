@@ -80,10 +80,10 @@ Result := True;
 if params.Count >= 1 then
   begin
   Log_.VerboseLoggingLevel := StrToInt(params[0]);
-  SendChat('Setting logging verbosity level to '+IntToStr(Log_.VerboseLoggingLevel));
+  SendChatLocal('Setting logging verbosity level to '+IntToStr(Log_.VerboseLoggingLevel));
   end
 else
-  SendChat('Current logging verbosity level:'+IntToStr(Log_.VerboseLoggingLevel));
+  SendChatLocal('Current logging verbosity level:'+IntToStr(Log_.VerboseLoggingLevel));
 end;
 
 function TDPlay.OnCrash( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
@@ -91,14 +91,14 @@ begin
 Result := True;
 if not crash then
   begin
-  SendChat ('Recorder will not catch exceptions');
-  SendChat ('If TA crashes, please send your errorlog.txt to us');
+  SendChatLocal ('Recorder will not catch exceptions');
+  SendChatLocal ('If TA crashes, please send your errorlog.txt to us');
 
   crash := true;
   end
 else
   begin
-  SendChat ('Recorder will catch exceptions');
+  SendChatLocal ('Recorder will catch exceptions');
   crash := false;
   end;
 end;
@@ -106,17 +106,17 @@ end;
 function TDPlay.OnPanic( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
 begin
 Result := True;
-SendChat('Recorder for '+Players[1].name+' off');
+SendChatLocal('Recorder for '+Players[1].name+' off');
 TADemoRecorderOff := True;
 end;
 
 function TDPlay.OnAbout( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
 begin
 Result := True;
-SendChat('TA demo recorder ' + GetTADemoVersion);
-SendChat('Written by SY_SJ and SY_Fnordia');
-SendChat('Updated by Xon, Xpoy and Rime');
-SendChat('Visit http://www.tauniverse.com for more info');
+SendChatLocal('TA demo recorder ' + GetTADemoVersion);
+SendChatLocal('Written by SY_SJ and SY_Fnordia');
+SendChatLocal('Updated by Xon, Xpoy and Rime');
+SendChatLocal('Visit http://www.tauniverse.com for more info');
 end;
 
 function TDPlay.OnFixall( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
@@ -127,8 +127,10 @@ if fixon then
   protectdt := true;
   fixfacexps := true;
 
-  SendChat('All fixes turned on');
-  end;
+  SendChatLocal('All fixes turned on');
+  end
+else
+  SendChatLocal('Lag fixes are disabled by the host');
 end;
 
 function TDPlay.OnFixFactoryExplosions( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
@@ -136,18 +138,18 @@ begin
 Result := True;
 if not fixon then
   begin
-  SendChat('Lag fixes disabled');
+  SendChatLocal('Lag fixes disabled');
   Exit;
   end;
 if fixfacexps then
   begin
   fixfacexps := false;
-  SendChat('Factory explosion fix disabled');
+  SendChatLocal('Factory explosion fix disabled');
   end
 else
   begin
   fixfacexps := true;
-  SendChat('Factory explosion fix enabled');
+  SendChatLocal('Factory explosion fix enabled');
   end;
 end;
 
@@ -156,18 +158,18 @@ begin
 Result := True;
 if not fixon then
   begin
-  SendChat('Lag fixes disabled');
+  SendChatLocal('Lag fixes disabled');
   Exit;
   end;
 if protectdt then
   begin
   protectdt:=false;
-  SendChat('Missing DT fix disabled');
+  SendChatLocal('Missing DT fix disabled');
   end
 else
   begin
   protectdt:=true;
-  SendChat('Missing DT fix enabled');
+  SendChatLocal('Missing DT fix enabled');
   end;
 end;
 
@@ -202,13 +204,13 @@ var
   tmp : String;
 begin
 Result := True;
-SendChat ('Current position of the players:');
+SendChatLocal ('Current position of the players:');
 for i := 1 to Players.Count do
   begin
   tmp := IntToStr ((Players[i].LastTimeStamp div 30) mod 60);
   if length (tmp) = 1 then
     tmp := '0' + tmp;
-  SendChat (' (' + IntToStr (Players[i].LastTimeStamp div 1800)+':'+ tmp + ') - ' +Players[i].name);
+  SendChatLocal (' (' + IntToStr (Players[i].LastTimeStamp div 1800)+':'+ tmp + ') - ' +Players[i].name);
 
   end;
 
@@ -222,14 +224,14 @@ begin
 Result := True;
 if PacketsToFilter <> nil then
   begin
-  SendChat('Packet filtering enabled');
+  SendChatLocal('Packet filtering enabled');
   s := '';
   for i :=  0 to High(PacketsToFilter) do
     s := s+'$'+InttoHex(PacketsToFilter[i],2)+' ';
-  SendChat('Filtering out '+s);
+  SendChatLocal('Filtering out '+s);
   end
 else
-  SendChat('Packet filtering disabled');
+  SendChatLocal('Packet filtering disabled');
 end;
 
 function TDPlay.OnDisableFilter( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
@@ -238,7 +240,7 @@ Result := True;
 if PacketsToFilter <> nil then
   begin
   PacketsToFilter := nil;
-  SendChat('Packet filtering disabled');
+  SendChatLocal('Packet filtering disabled');
   end;
 end;
 
@@ -254,7 +256,7 @@ Result := True;
 if params.Count <> 0 then
   begin
   if PacketsToFilter = nil then
-    SendChat('Packet filtering enabled');
+    SendChatLocal('Packet filtering enabled');
   s := '';
   setlength( PacketsToFilter2, Length(PacketsToFilter)+params.Count );
   for i := 0 to High(PacketsToFilter) do
@@ -282,7 +284,7 @@ if params.Count <> 0 then
     begin
     setlength( PacketsToFilter2, Count );
     PacketsToFilter := PacketsToFilter2;
-    SendChat('Filtering out '+s);
+    SendChatLocal('Filtering out '+s);
     end;
   end;
 end;
@@ -319,10 +321,10 @@ if params.Count <> 0 then
     begin
     setlength( PacketsToFilter2, Count );
     PacketsToFilter := PacketsToFilter2;
-    SendChat('Removed filtering of '+s);
+    SendChatLocal('Removed filtering of '+s);
     end;
   if PacketsToFilter = nil then
-    SendChat('Packet filtering enabled');
+    SendChatLocal('Packet filtering enabled');
   end;
 end;
 
@@ -339,12 +341,12 @@ if TAStatus = InBattleRoom then
   if (ExtractFileExt(FileName)='') and (FileName<>'') and (FileName<>'none') then
     if iniSettings.demosprefix <> '' then FileName := iniSettings.demosprefix + FileName+'.tad' else FileName := FileName+'.tad';
   if FileName<>'none' then
-    SendChat('Recording to '+FileName)
+    SendChatLocal('Recording to '+FileName)
   else
-    SendChat('Recording disabled');
+    SendChatLocal('Recording disabled');
 
   if ai <> '' then
-    SendChat ('Warning: A custom AI (' + ai + ') is enabled');
+    SendChatLocal ('Warning: A custom AI (' + ai + ') is enabled');
   end
 else
   begin
@@ -367,7 +369,7 @@ else
     begin
     IsRecording := true;
     prevtime := GetTickCount;
-    SendChat('Recording to '+FileName);
+    SendChatLocal('Recording to '+FileName);
     end;
   end;
 end;
@@ -409,21 +411,21 @@ Result := True;
 if (params.Count = 0) or (TAStatus = InGame) then
   begin
   if use3d then
-    SendChat ('3D TA is enabled')
+    SendChatLocal ('3D TA is enabled')
   else
-    SendChat ('3D TA is disabled');
+    SendChatLocal ('3D TA is disabled');
   end
 else if IsStrBool( params[0], Value ) then
   begin
   if Value then
     begin
     use3d := true;
-    SendChat ('3D TA now enabled');
+    SendChatLocal ('3D TA now enabled');
     end
   else
     begin
     use3d := false;
-    SendChat ('3D TA now disabled');
+    SendChatLocal ('3D TA now disabled');
     end
   end
 else
@@ -435,7 +437,7 @@ begin
 Result := True;
 IsRecording := False;
 
-SendChat('logging halted');
+SendChatLocal('logging halted');
 end;
 
 function TDPlay.OnOnlyUnits( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
@@ -444,12 +446,12 @@ Result := True;
 if onlyunits then
   begin
   onlyunits := false;
-  SendChat('All packets recorded');
+  SendChatLocal('All packets recorded');
   end
 else
   begin
   onlyunits := true;
-  SendChat('Only the units will be recorded');
+  SendChatLocal('Only the units will be recorded');
   end;
 end;
 
@@ -459,12 +461,12 @@ Result := True;
 if createtxtfile then
   begin
   createTxtFile:=false;
-  SendChat('Not creating a txt file');
+  SendChatLocal('Not creating a txt file');
   end
 else
   begin
   createTxtFile:=true;
-  SendChat('Will create a txt file with game info');
+  SendChatLocal('Will create a txt file with game info');
   end;
 end;
 
@@ -507,12 +509,12 @@ Result := True;
 if fakewatch then
   begin
   fakewatch := false;
-  SendChat('Normal player mode');
+  SendChatLocal('Normal player mode');
   end
 else
   begin
   fakewatch := true;
-  SendChat('Fake watcher mode');
+  SendChatLocal('Fake watcher mode');
   end;
 end;
 
@@ -522,9 +524,9 @@ Result := true;
 datachanged := true;
 fakecd := not fakecd;
 if fakecd then
-  SendChat( 'Fake CD enabled for '+Players[1].name)
+  SendChatLocal( 'Fake CD enabled for '+Players[1].name)
 else
-  SendChat( 'Fake CD disabled for '+Players[1].Name)
+  SendChatLocal( 'Fake CD disabled for '+Players[1].Name)
 end;
 
 function TDPlay.OnLookUpAddr( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;

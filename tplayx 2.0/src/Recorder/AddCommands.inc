@@ -33,7 +33,7 @@
               [InGame,InBattleRoom], False, False, False, False, Onehareport );
   Commands.AddCommand( 'status', 'Same as .report, except only your own recorder replies and noone else sees it. Useful to silently check if your recorder is turned on.',
               '',0,
-              [InGame,InBattleRoom], False, False, False, False, OnStatus );
+              [InGame,InBattleRoom], False, True, False, False, OnStatus );
   Commands.AddCommand( 'votego', 'Signifies you''re ready to go. If all players issue .votego, this will forcibly click in watchers. Useful if one of them left to take a shower or something without clicking in. ',
               '',0,
               [InBattleRoom], False, False, False, False, OnVoteGo );
@@ -101,7 +101,7 @@
               [InBattleRoom], True, False, False, False, OnBase );
   Commands.AddCommand( 'dobase', 'Places a predefined base around your first structure. This command has to be activated by the host by issuing .base in the Battle Room. Make sure there is flat ground to accomodate the base! ',
               '',0,
-              [InGame], True, False, False, False, Ondobase );
+              [InGame], False, False, False, False, Ondobase );
 
   Commands.AddCommand( 'help', 'Allows access various information about another command.'#10+
                       'info <command> - Returns the help information about a command'#10+
@@ -132,7 +132,7 @@
   Commands.AddCommand( 'protectdt', 'Tries to make sure DTs aren''t lost. Without this fix, sometimes an opponent will see holes in an actually solid DT line you built. ',
               '',0,
               [InGame,InBattleRoom], False, True, False, False, OnProtectDT);
-  Commands.AddCommand( 'fixall', 'Toggles both lag workarounds at once: .fixfacexps and .protectdt. ',
+  Commands.AddCommand( 'fixall', 'Turns on both lag workarounds at once: .fixfacexps and .protectdt. ',
               '',0,
               [InGame,InBattleRoom], False, True, False, False, OnFixall);
   Commands.AddCommand( 'time', 'Displays the game time for all players according to their +clock. Useful for spotting a lagging player. ',
@@ -172,7 +172,7 @@
                          'list of maps to play on you can use it by specifying the filename. ',
               'filename',0,
               [InBattleRoom], False, True, False, False, OnRandMap);
-  Commands.AddCommandAlias( 'randmapex', 'rm' );
+  Commands.AddCommandAlias( 'randmap', 'rm' );
   Commands.AddCommand( 'fakewatch', 'Gives you the ability to chat while watching. Join the game as a regular player for it to work. You will appear as a watcher to everyone else and will be unable to affect anything, except that you '+
                            'will be able to chat. Note that fake watchers occupy the first slots in the game, causing some disruption for the rest of the players'' start positions. You may want to use .cmdwarp as a workaround. ',
               '',0,
@@ -206,7 +206,7 @@
   Commands.AddCommand( 'crashme', 'Causes an exception to be raised',
               '',0,
               [InGame,InBattleRoom], False, True, False, True, OnCrashMe);
-  Commands.AddCommand( 'loggingverbosity', 'Causes an exception to be raised',
+  Commands.AddCommand( 'loggingverbosity', 'Shows or sets the recorder log detail level',
               '<1-5>',0,
               [InGame,InBattleRoom], False, True, False, True, OnLoggingVerbosity);
 

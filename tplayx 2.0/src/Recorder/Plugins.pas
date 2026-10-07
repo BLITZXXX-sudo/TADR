@@ -47,6 +47,7 @@ uses
   Developers,
   StatsLogging,
   CloakOnly,
+  MidBattleTest,
   OnOffPortal;
 
 const
@@ -173,6 +174,7 @@ begin
     SafeRegister('Developers', @           Developers.GetPlugin);
     SafeRegister('CloakOnly', @            CloakOnly.GetPlugin);
     SafeRegister('OnOffPortal', @          OnOffPortal.GetPlugin);
+    SafeRegister('MidBattleTest', @        MidBattleTest.GetPlugin);
     Log('--- All plugins registered ---');
   end;
 

@@ -439,5 +439,6 @@ Result := True;
 QuickBaseEnabled := false;
 for i := 1 to 10 do
   Players[i].GiveBase := false;
-SendChat('Quick base disabled');
+if ImServer then
+  SendChat('Quick base disabled');
 end;

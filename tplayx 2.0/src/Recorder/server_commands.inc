@@ -25,7 +25,7 @@ function TDPlay.Onf1off( const Command : string; Sender : TPlayerData; params : 
 begin
 Result := True;
 F1Disable := 1;
-SendChat('*** '+Sender.Name+' F1 key disabled');
+SendChat('*** '+Players[1].Name+' F1 key disabled');
 end;
 
 function TDPlay.OnCmdwarp( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
@@ -60,7 +60,7 @@ try
 except
   on E :  EConvertError do
     begin
-    sendchat (e.message);
+    if ImServer then SendChatLocal(e.message);
     exit;
     end;
 end;
@@ -69,7 +69,7 @@ try
 except
   on E :  EConvertError do
     begin
-    sendchat (e.message);
+    if ImServer then SendChatLocal(e.message);
     exit;
     end;
 end;
@@ -111,7 +111,8 @@ end;
 function TDPlay.OnSyncOff( const Command : string; Sender : TPlayerData; params : TStringList ) : Boolean;
 begin
 Result := True;
-sendchat ('Sync correction disabled');
+if ImServer then
+  sendchat ('Sync correction disabled');
 notime := True;
 end;
 

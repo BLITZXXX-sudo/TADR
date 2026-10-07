@@ -72,7 +72,7 @@ $ro = Get-ChildItem (Join-Path $PSScriptRoot 'src') -Recurse -File -ErrorAction 
 if ($ro) { $ro | ForEach-Object { $_.IsReadOnly = $false }; Say "Cleared read-only flag on $(@($ro).Count) file(s)" 'Yellow' }
 
 # ---------------------------------------------------------------- 1. build
-$modeArgs = if ($Debug) { @('--build-mode=Debug') } else { @() }
+$modeArgs = if ($Debug) { @('--build-mode=Debug') } else { @('--build-mode=Default') }
 Say "--- 1. lazbuild --build-all $(if ($Debug) {'(Debug)'} else {'(Release: stripped + smart-linked)'}) ---" 'Cyan'
 Push-Location $ProjectDir
 try {

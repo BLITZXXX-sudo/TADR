@@ -1207,7 +1207,11 @@ if i>0 then
 
           try
             if not handled then
+              begin
               handled := CommandHandler.CommandHandler( Command, Sender, params );
+              if CommandHandler.IsSelfOnly and Sender.IsSelf then
+                datachanged := true;
+              end;
           except
             on e : Exception do
               begin

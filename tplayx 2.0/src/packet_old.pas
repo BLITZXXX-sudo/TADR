@@ -51,6 +51,7 @@ type
   end;
 
 var
+  LastSubPacket : string = '';
   DecompressionBufferSize : Integer = 2048;
   UseCompression : Boolean = false;
 implementation
@@ -149,7 +150,7 @@ case byte(s[index]) of
               end;
             end;
 
-  $20       :Result := 192;
+  $20       :Result := 186;
   $24       :Result := 6;
   $26       :Result := 41;
 
@@ -268,8 +269,10 @@ if length(s) < len then
   end;
 if len = 0 then
   begin
-  TLog.Add (1,'From '+FromPlayer+' to '+ ToPlayer+', unknown packet : $' + IntToHex( byte(s[1]), 2) + ' '+datatostr2(s));
+  TLog.Add (1,'From '+FromPlayer+' to '+ ToPlayer+', unknown packet : $' + IntToHex( byte(s[1]), 2) + ' '+datatostr2(s)+
+              ' | after '+datatostr2(LastSubPacket));
   Result := s;
+  LastSubPacket := '';
   s := '';
   end
 else
@@ -277,6 +280,7 @@ else
   tmp := s;
   s := Copy( tmp, len+1 , Length(s) );
   result := Copy (tmp, 1, len);
+  if s = '' then LastSubPacket := '' else LastSubPacket := result;
   end;
 end;
 
