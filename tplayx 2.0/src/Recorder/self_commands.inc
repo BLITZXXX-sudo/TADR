@@ -333,6 +333,7 @@ begin
 Result := True;
 if TAStatus = InBattleRoom then
   begin
+  RecordAuto := params.Count = 0;
   if params.Count <> 0 then
     FileName := params[0]
   else
@@ -340,7 +341,13 @@ if TAStatus = InBattleRoom then
 
   if (ExtractFileExt(FileName)='') and (FileName<>'') and (FileName<>'none') then
     if iniSettings.demosprefix <> '' then FileName := iniSettings.demosprefix + FileName+'.tad' else FileName := FileName+'.tad';
-  if FileName<>'none' then
+  if RecordAuto then
+    begin
+    MakeAutoFileName;
+    SendChatLocal('Recording to '+ExtractFileName(FileName)+' (auto name, set when the game starts)');
+    FileName := '';
+    end
+  else if FileName<>'none' then
     SendChatLocal('Recording to '+FileName)
   else
     SendChatLocal('Recording disabled');
@@ -360,16 +367,16 @@ else
     if (ExtractFileExt(FileName)='') and (FileName<>'') then
       if iniSettings.demosprefix <> '' then FileName := iniSettings.demosprefix + FileName+'.tad' else FileName := FileName+'.tad';
     if FileName <> '' then
-      begin
-      FileName := removeinvalid (FileName);
-      createlogfile();
-      end;
+      FileName := removeinvalid (FileName)
+    else
+      MakeAutoFileName;
+    createlogfile();
     end;
   if FileName<>'' then
     begin
     IsRecording := true;
     prevtime := GetTickCount;
-    SendChatLocal('Recording to '+FileName);
+    SendChatLocal('Recording to '+ExtractFileName(FileName));
     end;
   end;
 end;

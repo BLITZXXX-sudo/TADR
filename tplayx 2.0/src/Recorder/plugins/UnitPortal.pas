@@ -30,6 +30,11 @@ type
   end;
 
 procedure PortalOnOff_GetOverlay(out Info: TPortalOverlayInfo);
+function PortalOnOff_GetOverlayAt(Slot: Integer; out Info: TPortalOverlayInfo): Boolean;
+function PortalOnOff_HasFerry(p_Unit: PUnitStruct): Boolean;
+
+const
+  MAX_FERRIES = 32;
 
 implementation
 
@@ -98,6 +103,84 @@ var
   HoverDueTime: Integer = 0;
 
   Map_ScreenToWorldClick: procedure(pData: Pointer); stdcall;
+
+type
+  TFerry = record
+    InUse        : Boolean;
+    UnitId       : Word;
+    Src, Dst     : TPortalPos;
+    Enabled      : Boolean;
+    Phase        : Integer;
+    Straggler    : Boolean;
+    FullWait     : Cardinal;
+    HoverPending : Boolean;
+    HoverDue     : Integer;
+  end;
+
+var
+  Ferries    : array[0..MAX_FERRIES - 1] of TFerry;
+  EmptyFerry : TFerry;
+  CurFerry   : Integer = -1;
+  FerryCS    : TRTLCriticalSection;
+
+procedure LoadFerry(i: Integer);
+begin
+  CurFerry := i;
+  SourcePos := Ferries[i].Src;
+  DestPos := Ferries[i].Dst;
+  AutoLoopEnabled := Ferries[i].Enabled;
+  AutoLoopUnitId := Ferries[i].UnitId;
+  SelectedUnitId := Ferries[i].UnitId;
+  AutoLoopPhase := Ferries[i].Phase;
+  StragglerCheckPending := Ferries[i].Straggler;
+  FullWaitStartTick := Ferries[i].FullWait;
+  HoverPending := Ferries[i].HoverPending;
+  HoverUnitId := Ferries[i].UnitId;
+  HoverDueTime := Ferries[i].HoverDue;
+end;
+
+procedure SaveFerry;
+var
+  F: ^TFerry;
+begin
+  if CurFerry < 0 then Exit;
+  F := @Ferries[CurFerry];
+  F^.Src := SourcePos;
+  F^.Dst := DestPos;
+  F^.Enabled := AutoLoopEnabled;
+  F^.Phase := AutoLoopPhase;
+  F^.Straggler := StragglerCheckPending;
+  F^.FullWait := FullWaitStartTick;
+  F^.HoverPending := HoverPending;
+  F^.HoverDue := HoverDueTime;
+  F^.InUse := F^.Src.Active or F^.Dst.Active or F^.Enabled or F^.HoverPending;
+  if not F^.InUse then F^.UnitId := 0;
+  CurFerry := -1;
+end;
+
+function FerrySlot(UnitId: Word; Create: Boolean): Integer;
+var
+  i: Integer;
+begin
+  Result := -1;
+  if UnitId = 0 then Exit;
+  for i := 0 to MAX_FERRIES - 1 do
+    if Ferries[i].InUse and (Ferries[i].UnitId = UnitId) then
+    begin
+      Result := i;
+      Exit;
+    end;
+  if not Create then Exit;
+  for i := 0 to MAX_FERRIES - 1 do
+    if not Ferries[i].InUse then
+    begin
+      Ferries[i] := EmptyFerry;
+      Ferries[i].InUse := True;
+      Ferries[i].UnitId := UnitId;
+      Result := i;
+      Exit;
+    end;
+end;
 
 procedure ChatMsg(const Msg: String);
 begin
@@ -1151,8 +1234,7 @@ begin
   Result := (FerryWaitFull(p_Unit) = 0) or TransportWouldBeFull(p_Unit, 0, 0) or FullLoadWaitTimedOut(p_Unit);
 end;
 
-function AutoLoopThreadProc(Param: Pointer): Integer; stdcall;
-
+procedure FerryStep;
 var
   p_Unit: PUnitStruct;
   IsReady: Boolean;
@@ -1162,142 +1244,155 @@ var
   StragglerSpot, SourceHoldPos: TPosition;
   StepResult: LongInt;
 begin
-  Result := 0;
+  if not AutoLoopEnabled then
+    Exit;
 
+  p_Unit := TAUnit.Id2Ptr(AutoLoopUnitId);
+  if not TransportAlive(p_Unit) then
+  begin
+    FerryShutdown('tracked transport #' + IntToStr(AutoLoopUnitId) + ' died / no longer valid');
+    Exit;
+  end;
+
+  if p_Unit.p_MainOrder = nil then
+
+  else
+    ;
+
+  IsReady := (p_Unit.p_MainOrder = nil) or
+             (p_Unit.p_MainOrder.cOrderType = Ord(Action_Patrol)) or
+             (p_Unit.p_MainOrder.cOrderType = Ord(Action_VTOL_Patrol)) or
+             (p_Unit.p_MainOrder.cOrderType = Ord(Action_VTOL_Standby)) or
+             (p_Unit.p_MainOrder.cOrderType = Ord(Action_Ready));
+  if not IsReady then
+  begin
+    Exit;
+  end;
+
+  if AutoLoopPhase = 2 then
+  begin
+    AutoLoopPhase := 0;
+    StragglerCheckPending := True;
+    FullWaitStartTick := 0;
+  end;
+
+  if AutoLoopPhase = 1 then
+  begin
+    LoadedCount := TAUnit.GetLoadCurAmount(p_Unit);
+    AutoLoopPhase := 0;
+    if LoadedCount > 0 then
+    begin
+      if ReadyToDispatch(p_Unit) then
+      begin
+        if PortalAutoDeliverPhase(p_Unit, LoadedCount) then
+        begin
+          AutoLoopPhase := 2;
+          FullWaitStartTick := 0;
+        end;
+      end else
+      begin
+        if FullWaitStartTick = 0 then FullWaitStartTick := GetTickCount;
+      end;
+    end;
+    Exit;
+  end;
+
+  if StragglerCheckPending then
+  begin
+    StragglerCount := TAUnit.GetLoadCurAmount(p_Unit);
+    if StragglerCount > 0 then
+    begin
+
+      if FindNearestValidUnloadSpot(p_Unit, p_Unit.Position, StragglerSpot) then
+      begin
+        if IsFlyingUnit(p_Unit) then
+        begin
+          StepResult := IssueScriptOrder(p_Unit, nil, 'VTOL_MOVE', @StragglerSpot, 0);
+          StepResult := IssueScriptOrder(p_Unit, nil, 'VTOL_UNLOAD', @StragglerSpot, 1);
+        end else
+        begin
+          StepResult := TAUnit.CreateMainOrder(p_Unit, nil, Action_Move_Ground, @StragglerSpot, 0, 0, 0);
+          StepResult := TAUnit.CreateMainOrder(p_Unit, nil, Action_Ground_Unload, @StragglerSpot, 1, 0, 0);
+        end;
+
+        if SourcePos.Active then
+        begin
+          SourceHoldPos.X := Integer(SourcePos.X) * 65536;
+          SourceHoldPos.Z := Integer(SourcePos.Z) * 65536;
+          SourceHoldPos.Y := Integer(SourcePos.Y) * 65536;
+          if IsFlyingUnit(p_Unit) then
+            IssueScriptOrder(p_Unit, nil, 'VTOL_PATROL', @SourceHoldPos, 1)
+          else
+            TAUnit.CreateMainOrder(p_Unit, nil, Action_Patrol, @SourceHoldPos, 1, 0, 0);
+        end;
+      end else
+        ;
+
+      Exit;
+    end;
+    StragglerCheckPending := False;
+  end;
+
+  LoadedCount := TAUnit.GetLoadCurAmount(p_Unit);
+  Candidates := FindLoadableUnitsNearSource(p_Unit, FerryPickupRadius(p_Unit));
+  CandWeight := 0;
+  for CandIdx := 0 to High(Candidates) do
+    CandWeight := CandWeight + Round(Candidates[CandIdx].p_UNITINFO.lBuildCostMetal);
+
+  if (FerryWaitFull(p_Unit) = 1) and (not FullLoadWaitTimedOut(p_Unit)) and
+     (not TransportWouldBeFull(p_Unit, Length(Candidates), CandWeight)) then
+  begin
+    if FullWaitStartTick = 0 then FullWaitStartTick := GetTickCount;
+    Exit;
+  end;
+
+  if Length(Candidates) = 0 then
+  begin
+    if LoadedCount > 0 then
+    begin
+
+      ;
+      if PortalAutoDeliverPhase(p_Unit, LoadedCount) then
+      begin
+        AutoLoopPhase := 2;
+        FullWaitStartTick := 0;
+      end;
+    end else
+      ;
+    Exit;
+  end;
+
+  if PortalAutoLoadPhase(p_Unit, Candidates) then
+    AutoLoopPhase := 1;
+end;
+
+function AutoLoopThreadProc(Param: Pointer): Integer; stdcall;
+var
+  i: Integer;
+begin
+  Result := 0;
   while AutoLoopThreadActive do
   begin
     Sleep(Cfg_AutoLoopPollMs);
     if not AutoLoopThreadActive then
       Break;
-
-    try
-
-      if not AutoLoopEnabled then
-        Continue;
-
-      p_Unit := TAUnit.Id2Ptr(AutoLoopUnitId);
-      if not TransportAlive(p_Unit) then
-      begin
-        FerryShutdown('tracked transport #' + IntToStr(AutoLoopUnitId) + ' died / no longer valid');
-        Continue;
-      end;
-
-      if p_Unit.p_MainOrder = nil then
-
-      else
-        ;
-
-      IsReady := (p_Unit.p_MainOrder = nil) or
-                 (p_Unit.p_MainOrder.cOrderType = Ord(Action_Patrol)) or
-                 (p_Unit.p_MainOrder.cOrderType = Ord(Action_VTOL_Patrol)) or
-                 (p_Unit.p_MainOrder.cOrderType = Ord(Action_VTOL_Standby)) or
-                 (p_Unit.p_MainOrder.cOrderType = Ord(Action_Ready));
-      if not IsReady then
-      begin
-        Continue;
-      end;
-
-      if AutoLoopPhase = 2 then
-      begin
-        AutoLoopPhase := 0;
-        StragglerCheckPending := True;
-        FullWaitStartTick := 0;
-      end;
-
-      if AutoLoopPhase = 1 then
-      begin
-        LoadedCount := TAUnit.GetLoadCurAmount(p_Unit);
-        AutoLoopPhase := 0;
-        if LoadedCount > 0 then
-        begin
-          if ReadyToDispatch(p_Unit) then
-          begin
-            if PortalAutoDeliverPhase(p_Unit, LoadedCount) then
-            begin
-              AutoLoopPhase := 2;
-              FullWaitStartTick := 0;
-            end;
-          end else
-          begin
-            if FullWaitStartTick = 0 then FullWaitStartTick := GetTickCount;
-          end;
+    for i := 0 to MAX_FERRIES - 1 do
+    begin
+      if not (Ferries[i].InUse and Ferries[i].Enabled) then Continue;
+      EnterCriticalSection(FerryCS);
+      try
+        try
+          LoadFerry(i);
+          FerryStep;
+        except
+          on E: Exception do ;
         end;
-        Continue;
+        SaveFerry;
+      finally
+        LeaveCriticalSection(FerryCS);
       end;
-
-      if StragglerCheckPending then
-      begin
-        StragglerCount := TAUnit.GetLoadCurAmount(p_Unit);
-        if StragglerCount > 0 then
-        begin
-
-          if FindNearestValidUnloadSpot(p_Unit, p_Unit.Position, StragglerSpot) then
-          begin
-            if IsFlyingUnit(p_Unit) then
-            begin
-              StepResult := IssueScriptOrder(p_Unit, nil, 'VTOL_MOVE', @StragglerSpot, 0);
-              StepResult := IssueScriptOrder(p_Unit, nil, 'VTOL_UNLOAD', @StragglerSpot, 1);
-            end else
-            begin
-              StepResult := TAUnit.CreateMainOrder(p_Unit, nil, Action_Move_Ground, @StragglerSpot, 0, 0, 0);
-              StepResult := TAUnit.CreateMainOrder(p_Unit, nil, Action_Ground_Unload, @StragglerSpot, 1, 0, 0);
-            end;
-
-            if SourcePos.Active then
-            begin
-              SourceHoldPos.X := Integer(SourcePos.X) * 65536;
-              SourceHoldPos.Z := Integer(SourcePos.Z) * 65536;
-              SourceHoldPos.Y := Integer(SourcePos.Y) * 65536;
-              if IsFlyingUnit(p_Unit) then
-                IssueScriptOrder(p_Unit, nil, 'VTOL_PATROL', @SourceHoldPos, 1)
-              else
-                TAUnit.CreateMainOrder(p_Unit, nil, Action_Patrol, @SourceHoldPos, 1, 0, 0);
-            end;
-          end else
-            ;
-
-          Continue;
-        end;
-        StragglerCheckPending := False;
-      end;
-
-      LoadedCount := TAUnit.GetLoadCurAmount(p_Unit);
-      Candidates := FindLoadableUnitsNearSource(p_Unit, FerryPickupRadius(p_Unit));
-      CandWeight := 0;
-      for CandIdx := 0 to High(Candidates) do
-        CandWeight := CandWeight + Round(Candidates[CandIdx].p_UNITINFO.lBuildCostMetal);
-
-      if (FerryWaitFull(p_Unit) = 1) and (not FullLoadWaitTimedOut(p_Unit)) and
-         (not TransportWouldBeFull(p_Unit, Length(Candidates), CandWeight)) then
-      begin
-        if FullWaitStartTick = 0 then FullWaitStartTick := GetTickCount;
-        Continue;
-      end;
-
-      if Length(Candidates) = 0 then
-      begin
-        if LoadedCount > 0 then
-        begin
-
-          ;
-          if PortalAutoDeliverPhase(p_Unit, LoadedCount) then
-          begin
-            AutoLoopPhase := 2;
-            FullWaitStartTick := 0;
-          end;
-        end else
-          ;
-        Continue;
-      end;
-
-      if PortalAutoLoadPhase(p_Unit, Candidates) then
-        AutoLoopPhase := 1;
-    except
-      on E: Exception do
-        ;
     end;
   end;
-
 end;
 
 function StartAutoLoopForUnit(p_Unit: PUnitStruct): Boolean;
@@ -1370,21 +1465,32 @@ begin
 end;
 
 procedure PortalOnOff_Tick;
+var
+  i: Integer;
 begin
-  try
-    if TAData.MainStruct <> nil then
-      FireHoverIfPending(False);
-  except
-    on E: Exception do ;
+  if TAData.MainStruct = nil then Exit;
+  for i := 0 to MAX_FERRIES - 1 do
+  begin
+    if not (Ferries[i].InUse and Ferries[i].HoverPending) then Continue;
+    EnterCriticalSection(FerryCS);
+    try
+      try
+        LoadFerry(i);
+        FireHoverIfPending(False);
+      except
+        on E: Exception do ;
+      end;
+      SaveFerry;
+    finally
+      LeaveCriticalSection(FerryCS);
+    end;
   end;
 end;
 
-procedure PortalOnOff_BeginForUnit(p_Unit: PUnitStruct);
+procedure BeginForUnitCur(p_Unit: PUnitStruct);
 var
   UnitId: Word;
 begin
-  if (p_Unit = nil) or (p_Unit.p_UNITINFO = nil) then
-    Exit;
   UnitId := TAUnit.GetId(p_Unit);
 
   if AutoLoopEnabled and (AutoLoopUnitId = UnitId) then
@@ -1409,7 +1515,32 @@ begin
   ChatMsg('Auto transport enabled: ' + String(p_Unit.p_UNITINFO.szName));
 end;
 
-function PortalOnOff_DispatchToTarget(p_Unit: PUnitStruct; const Target: TPosition): Boolean;
+procedure PortalOnOff_BeginForUnit(p_Unit: PUnitStruct);
+var
+  Slot: Integer;
+begin
+  if (p_Unit = nil) or (p_Unit.p_UNITINFO = nil) then
+    Exit;
+  EnterCriticalSection(FerryCS);
+  try
+    Slot := FerrySlot(TAUnit.GetId(p_Unit), True);
+    if Slot < 0 then
+    begin
+      ChatMsg('Auto transport: too many ferries running (max ' + IntToStr(MAX_FERRIES) + ')');
+      Exit;
+    end;
+    LoadFerry(Slot);
+    try
+      BeginForUnitCur(p_Unit);
+    finally
+      SaveFerry;
+    end;
+  finally
+    LeaveCriticalSection(FerryCS);
+  end;
+end;
+
+function DispatchCur(p_Unit: PUnitStruct; const Target: TPosition): Boolean;
 var
   TX, TZ, TY, MapW, MapH, Loaded: Integer;
   Delivered: Boolean;
@@ -1463,12 +1594,48 @@ begin
   Result := True;
 end;
 
+function PortalOnOff_DispatchToTarget(p_Unit: PUnitStruct; const Target: TPosition): Boolean;
+var
+  Slot: Integer;
+begin
+  Result := False;
+  if (p_Unit = nil) or (p_Unit.p_UNITINFO = nil) then
+    Exit;
+  EnterCriticalSection(FerryCS);
+  try
+    Slot := FerrySlot(TAUnit.GetId(p_Unit), True);
+    if Slot < 0 then Exit;
+    LoadFerry(Slot);
+    try
+      Result := DispatchCur(p_Unit, Target);
+    finally
+      SaveFerry;
+    end;
+  finally
+    LeaveCriticalSection(FerryCS);
+  end;
+end;
+
 procedure PortalOnOff_StopForUnit(p_Unit: PUnitStruct);
+var
+  Slot: Integer;
 begin
   if p_Unit = nil then Exit;
-  if (AutoLoopEnabled and (AutoLoopUnitId = TAUnit.GetId(p_Unit))) or
-     ((not AutoLoopEnabled) and (SelectedUnitId = TAUnit.GetId(p_Unit))) then
-    FerryShutdown('switched OFF on ' + UnitDisplayName(p_Unit));
+  EnterCriticalSection(FerryCS);
+  try
+    Slot := FerrySlot(TAUnit.GetId(p_Unit), False);
+    if Slot < 0 then Exit;
+    LoadFerry(Slot);
+    FerryShutdown('switched OFF');
+    SaveFerry;
+  finally
+    LeaveCriticalSection(FerryCS);
+  end;
+end;
+
+function PortalOnOff_HasFerry(p_Unit: PUnitStruct): Boolean;
+begin
+  Result := (p_Unit <> nil) and (FerrySlot(TAUnit.GetId(p_Unit), False) >= 0);
 end;
 
 function PortalOnOff_TransportAlive(p_Unit: PUnitStruct): Boolean;
@@ -1476,49 +1643,82 @@ begin
   Result := TransportAlive(p_Unit);
 end;
 
-procedure PortalOnOff_GetOverlay(out Info: TPortalOverlayInfo);
+function PortalOnOff_GetOverlayAt(Slot: Integer; out Info: TPortalOverlayInfo): Boolean;
 var
   p: PUnitStruct;
+  F: TFerry;
 begin
   FillChar(Info, SizeOf(Info), 0);
-  if AutoLoopEnabled and not TransportAlive(TAUnit.Id2Ptr(AutoLoopUnitId)) then
-    FerryShutdown('transport #' + IntToStr(AutoLoopUnitId) + ' died (seen by overlay)');
-  Info.LoopRunning := AutoLoopEnabled;
-  Info.TransportId := AutoLoopUnitId;
-  Info.SrcOn := SourcePos.Active;
-  Info.SrcX := SourcePos.X;  Info.SrcY := SourcePos.Y;  Info.SrcZ := SourcePos.Z;
-  Info.DstOn := DestPos.Active;
-  Info.DstX := DestPos.X;    Info.DstY := DestPos.Y;    Info.DstZ := DestPos.Z;
-
-  p := nil;
-  if AutoLoopEnabled then p := TAUnit.Id2Ptr(AutoLoopUnitId)
-  else if SelectedUnitId <> 0 then p := TAUnit.Id2Ptr(SelectedUnitId);
+  Result := False;
+  if (Slot < 0) or (Slot >= MAX_FERRIES) then Exit;
+  EnterCriticalSection(FerryCS);
+  try
+    if not Ferries[Slot].InUse then Exit;
+    if Ferries[Slot].Enabled and not TransportAlive(TAUnit.Id2Ptr(Ferries[Slot].UnitId)) then
+    begin
+      LoadFerry(Slot);
+      FerryShutdown('transport died (seen by overlay)');
+      SaveFerry;
+      Exit;
+    end;
+    F := Ferries[Slot];
+  finally
+    LeaveCriticalSection(FerryCS);
+  end;
+  Result := True;
+  Info.LoopRunning := F.Enabled;
+  Info.TransportId := F.UnitId;
+  Info.SrcOn := F.Src.Active;
+  Info.SrcX := F.Src.X;  Info.SrcY := F.Src.Y;  Info.SrcZ := F.Src.Z;
+  Info.DstOn := F.Dst.Active;
+  Info.DstX := F.Dst.X;  Info.DstY := F.Dst.Y;  Info.DstZ := F.Dst.Z;
+  p := TAUnit.Id2Ptr(F.UnitId);
   Info.PickupRadius := FerryPickupRadius(p);
   Info.DropRadius := FerryDropRadius(p);
   Info.BeaconAnim := FerryBeaconAnim(p);
-  if AutoLoopEnabled then
+  if F.Enabled and (p <> nil) and (p.p_UNITINFO <> nil) then
   begin
-    p := TAUnit.Id2Ptr(AutoLoopUnitId);
-    if (p <> nil) and (p.p_UNITINFO <> nil) then
-    begin
-      Info.Aboard := TAUnit.GetLoadCurAmount(p);
-      Info.Capacity := p.p_UNITINFO.cTransportCap;
-      Info.WaitingFull := (AutoLoopPhase <> 2) and (FerryWaitFull(p) = 1) and
-                          not TransportWouldBeFull(p, 0, 0);
-    end;
+    Info.Aboard := TAUnit.GetLoadCurAmount(p);
+    Info.Capacity := p.p_UNITINFO.cTransportCap;
+    Info.WaitingFull := (F.Phase <> 2) and (FerryWaitFull(p) = 1) and
+                        not TransportWouldBeFull(p, 0, 0);
   end;
 end;
 
-function PortalOnOff_StatusLine: String;
+procedure PortalOnOff_GetOverlay(out Info: TPortalOverlayInfo);
+var
+  i: Integer;
+  p: PUnitStruct;
 begin
-  Result := 'loop=' + BoolToStr(AutoLoopEnabled, True) +
-    ' unit=' + IntToStr(AutoLoopUnitId) +
-    ' phase=' + IntToStr(AutoLoopPhase) +
-    ' src=' + BoolToStr(SourcePos.Active, True) + '(' + IntToStr(SourcePos.X) + ',' + IntToStr(SourcePos.Z) + ')' +
-    ' dst=' + BoolToStr(DestPos.Active, True) + '(' + IntToStr(DestPos.X) + ',' + IntToStr(DestPos.Z) + ')';
+  FillChar(Info, SizeOf(Info), 0);
+  for i := 0 to MAX_FERRIES - 1 do
+    if Ferries[i].InUse then
+    begin
+      p := TAUnit.Id2Ptr(Ferries[i].UnitId);
+      if (p <> nil) and ((p.lUnitStateMask and $10) <> 0) and PortalOnOff_GetOverlayAt(i, Info) then
+        Exit;
+    end;
+  for i := 0 to MAX_FERRIES - 1 do
+    if PortalOnOff_GetOverlayAt(i, Info) then
+      Exit;
+end;
+
+function PortalOnOff_StatusLine: String;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 0 to MAX_FERRIES - 1 do
+    if Ferries[i].InUse then
+      Result := Result + Format('[#%d loop=%s phase=%d src=%s(%d,%d) dst=%s(%d,%d)] ',
+        [Ferries[i].UnitId, BoolToStr(Ferries[i].Enabled, True), Ferries[i].Phase,
+         BoolToStr(Ferries[i].Src.Active, True), Ferries[i].Src.X, Ferries[i].Src.Z,
+         BoolToStr(Ferries[i].Dst.Active, True), Ferries[i].Dst.X, Ferries[i].Dst.Z]);
+  if Result = '' then Result := 'no ferries';
 end;
 
 initialization
+  InitializeCriticalSection(FerryCS);
   SelectedUnitId := 0;
 
   SourcePos.Active := False;

@@ -164,8 +164,18 @@ begin
   TAData.MainStruct.cBuildSpotState := TAData.MainStruct.cBuildSpotState and $DF;
 end;
 
+procedure FerryOff(p: PUnitStruct; const Why: String; Deactivate: Boolean); forward;
+
 procedure ArmUnit(p_Unit: PUnitStruct; const Why: String);
+var
+  Old: PUnitStruct;
 begin
+  if Armed and (ArmedUnitId <> TAUnit.GetId(p_Unit)) then
+  begin
+    Old := TAUnit.Id2Ptr(ArmedUnitId);
+    if (Old <> nil) and PortalOnOff_TransportAlive(Old) then
+      FerryOff(Old, 'another transport switched ON before a drop zone was set', True);
+  end;
   PortalOnOff_BeginForUnit(p_Unit);
   SetUnloadCursor;
   Armed := True;
@@ -233,15 +243,12 @@ end;
 
 procedure OnOffPortal_StopButtonPressed; stdcall;
 var
-  OI: TPortalOverlayInfo;
   i: Cardinal;
   p: PUnitStruct;
   Id: Word;
 begin
   try
     if (not LayoutOK) or (TAData.MainStruct = nil) then Exit;
-    PortalOnOff_GetOverlay(OI);
-    if not (Armed or OI.LoopRunning or OI.SrcOn or OI.DstOn) then Exit;
     for i := 1 to TAData.MaxUnitsID do
     begin
       p := TAUnit.Id2Ptr(i);
@@ -250,8 +257,7 @@ begin
       if not IsOnOffTransport(p) then Continue;
       if not TAUnit.IsOnThisComp(p, False) then Continue;
       Id := TAUnit.GetId(p);
-      if (Armed and (ArmedUnitId = Id)) or (OI.TransportId = Id) or
-         ((not OI.LoopRunning) and (OI.SrcOn or OI.DstOn)) then
+      if (Armed and (ArmedUnitId = Id)) or PortalOnOff_HasFerry(p) then
         FerryOff(p, 'STOP button', True);
     end;
   except
@@ -403,6 +409,7 @@ var
 procedure OnOffPortal_DrawOverlay(p_Offscreen: Pointer); stdcall;
 var
   O: TPortalOverlayInfo;
+  Slot: Integer;
   DeadId: Word;
   Shift: Boolean;
   SX, SY: Integer;
@@ -420,42 +427,44 @@ begin
       Disarm('armed transport died', True);
       PortalOnOff_StopForUnit(TAUnit.Id2Ptr(DeadId));
     end;
-    PortalOnOff_GetOverlay(O);
-    if not (O.LoopRunning or Armed) then Exit;
     Shift := (GetAsyncKeyState(VK_SHIFT) and $8000) <> 0;
-
-    if O.LoopRunning and O.DstOn and (OVERLAY_BEACON_ALWAYS or Shift) then
+    for Slot := 0 to MAX_FERRIES - 1 do
     begin
-      WorldToScreen(O.DstX, O.DstY, O.DstZ, SX, SY);
-      if OnScreen(SX, SY, 128) then
-        DrawBeacon(p_Offscreen, SX, SY, O.BeaconAnim);
-    end;
+      if not PortalOnOff_GetOverlayAt(Slot, O) then Continue;
 
-    if not Shift then Exit;
-
-    if O.SrcOn then
-    begin
-      WorldToScreen(O.SrcX, O.SrcY, O.SrcZ, SX, SY);
-      if OnScreen(SX, SY, O.PickupRadius) then
+      if O.LoopRunning and O.DstOn and (OVERLAY_BEACON_ALWAYS or Shift) then
       begin
-        DrawRing(p_Offscreen, SX, SY, O.PickupRadius, PalColor(OVERLAY_COLOR_PICKUP));
-        if O.LoopRunning then
-        begin
-          Txt := AnsiString(Format('PICKUP %d/%d', [O.Aboard, O.Capacity]));
-          if O.WaitingFull then Txt := Txt + ' - waiting for full load';
-        end else
-          Txt := 'PICKUP - click a drop zone';
-        DrawLabel(p_Offscreen, Txt, SX - 30, SY - 6, TRANSPORT_LABEL_COLOR);
+        WorldToScreen(O.DstX, O.DstY, O.DstZ, SX, SY);
+        if OnScreen(SX, SY, 128) then
+          DrawBeacon(p_Offscreen, SX, SY, O.BeaconAnim);
       end;
-    end;
 
-    if O.LoopRunning and O.DstOn then
-    begin
-      WorldToScreen(O.DstX, O.DstY, O.DstZ, SX, SY);
-      if OnScreen(SX, SY, O.DropRadius) then
+      if not Shift then Continue;
+
+      if O.SrcOn then
       begin
-        DrawRing(p_Offscreen, SX, SY, O.DropRadius, PalColor(OVERLAY_COLOR_DROP));
-        DrawLabel(p_Offscreen, 'DROP ZONE', SX - 26, SY + 12, TRANSPORT_LABEL_COLOR);
+        WorldToScreen(O.SrcX, O.SrcY, O.SrcZ, SX, SY);
+        if OnScreen(SX, SY, O.PickupRadius) then
+        begin
+          DrawRing(p_Offscreen, SX, SY, O.PickupRadius, PalColor(OVERLAY_COLOR_PICKUP));
+          if O.LoopRunning then
+          begin
+            Txt := AnsiString(Format('PICKUP %d/%d', [O.Aboard, O.Capacity]));
+            if O.WaitingFull then Txt := Txt + ' - waiting for full load';
+          end else
+            Txt := 'PICKUP - click a drop zone';
+          DrawLabel(p_Offscreen, Txt, SX - 30, SY - 6, TRANSPORT_LABEL_COLOR);
+        end;
+      end;
+
+      if O.LoopRunning and O.DstOn then
+      begin
+        WorldToScreen(O.DstX, O.DstY, O.DstZ, SX, SY);
+        if OnScreen(SX, SY, O.DropRadius) then
+        begin
+          DrawRing(p_Offscreen, SX, SY, O.DropRadius, PalColor(OVERLAY_COLOR_DROP));
+          DrawLabel(p_Offscreen, 'DROP ZONE', SX - 26, SY + 12, TRANSPORT_LABEL_COLOR);
+        end;
       end;
     end;
   except

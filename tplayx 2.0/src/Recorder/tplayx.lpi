@@ -20,7 +20,7 @@
       <MajorVersionNr Value="4"/>
       <MinorVersionNr Value="5"/>
       <RevisionNr Value="3"/>
-      <BuildNr Value="60"/>
+      <BuildNr Value="64"/>
       <Attributes pvaPreRelease="True"/>
     </VersionInfo>
     <BuildModes>

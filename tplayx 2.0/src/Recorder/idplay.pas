@@ -98,6 +98,7 @@ type
     LastFlushTimeStamp : Longword;
 
     AutoRecording : boolean;
+    RecordAuto : boolean;
 
     CreateTxtFile: boolean;
 
@@ -116,6 +117,7 @@ type
     NoFileName        : boolean;
 
     procedure createlogfile();
+    procedure MakeAutoFileName;
     function fnRemoveInvalidChar(const sString: string) : String;
   protected
     fPlayers : TPlayers;
@@ -537,10 +539,30 @@ var
 
   sendID : TDPid;
 begin
+// BUGFIX: Guard against offline/single-player mode where Players list is empty
+// In offline mode (single-player save), do NOT send network messages
+if (Players.Count = 0) and (Source = TDPID(-1)) then
+  begin
+  TLog.add(4, 'SendLocal: Offline mode detected, skipping DirectPlay send');
+  if local then
+    MessageQueue.EnQueue( Msg );
+  Exit;
+  end;
+
 if Source = TDPID(-1) then
-  sendID := Players[1].Id
+  begin
+  if Players.Count > 0 then
+    sendID := Players[1].Id
+  else
+    begin
+    // Offline mode: no valid player ID, use default
+    sendID := TDPID(1);
+    TLog.add(4, 'WARNING: SendLocal called in offline mode (empty Players list)');
+    end;
+  end
 else
   sendID := Source;
+
 if remote then
   begin
   p := TPacket.SJCreateNew (msg);
@@ -1103,10 +1125,65 @@ begin
   SendChat(s2);
 end;
 
+procedure TDPlay.MakeAutoFileName;
+var
+  a : Integer;
+begin
+  filename := FormatDateTime('yyyy-mm-dd',Date);
+  if IniSettings.demosprefix <> '' then
+    filename := filename + ' - ' + IniSettings.demosprefix + ' - '
+  else
+    filename:= filename + ' - ';
+  filename := filename + mapname;
+  if RecordPlayerNames then
+  begin
+    filename := filename + ' - ';
+    for a := 1 to Players.Count do
+    begin
+      filename := filename +Players[a].Name;
+      if a < Players.Count then
+        filename := filename + ', ';
+    end;
+  end;
+  filename := RemoveInvalid (filename);
+
+  if demodir <> '' then
+  begin
+    if IniSettings.modid > 0 then
+    begin
+      if (IniSettings.Name <> '') and
+         (IniSettings.Version <> '') then
+      begin
+        filename := IncludeTrailingPathDelimiter(demodir) +
+                    IncludeTrailingPathDelimiter(fnRemoveInvalidChar(IniSettings.name)) +
+                    IncludeTrailingPathDelimiter(fnRemoveInvalidChar(IniSettings.Version)) +
+                    filename;
+      end else
+        if (IniSettings.Name <> '') then
+          filename := IncludeTrailingPathDelimiter(demodir) +
+                      IncludeTrailingPathDelimiter(fnRemoveInvalidChar(IniSettings.name)) +
+                      filename
+        else
+          filename := IncludeTrailingPathDelimiter(demodir) + filename;
+    end else
+      filename := IncludeTrailingPathDelimiter(demodir) + filename;
+  end;
+
+  if fileexists (filename + '.tad') then
+  begin
+    a := 1;
+    repeat
+      inc (a);
+    until not fileexists (filename + ' - nr ' + inttostr (a) + '.tad');
+    filename := filename + ' - nr ' + inttostr (a);
+  end;
+  filename := filename + '.tad';
+end;
+
 function TDPlay.getRecorderStatusString : string;
 begin
 result:='';
-if (filename<>'') or (AutoRecording and (filename<>'none'))then
+if (filename<>'') or ((AutoRecording or RecordAuto) and (filename<>'none'))then
   result:=result+'T'
 else
   result:=result+'-';
@@ -1859,7 +1936,10 @@ begin
     LastFlushTimeStamp := TimeStamp;
     TLog.Flush;
     If logsave <> nil then
-      logsave.Flush;
+      try
+        logsave.Flush;
+      except
+      end;
   end;
 
   if FromPlayer <> nil then
@@ -2211,58 +2291,9 @@ begin
               prevtime := timeGetTime;
             end;
 
-            if (filename = '') and AutoRecording and NotViewingRecording then
+            if (filename = '') and (AutoRecording or RecordAuto) and NotViewingRecording then
             begin
-
-              filename := FormatDateTime('yyyy-mm-dd',Date);
-              if IniSettings.demosprefix <> '' then
-                filename := filename + ' - ' + IniSettings.demosprefix + ' - '
-              else
-                filename:= filename + ' - ';
-              filename := filename + mapname;
-              if RecordPlayerNames then
-              begin
-                filename := filename + ' - ';
-                for a := 1 to Players.Count do
-                begin
-                  filename := filename +Players[a].Name;
-                  if a < Players.Count then
-                    filename := filename + ', ';
-                end;
-              end;
-              filename := RemoveInvalid (filename);
-
-              if demodir <> '' then
-              begin
-                if IniSettings.modid > 0 then
-                begin
-                  if (IniSettings.Name <> '') and
-                     (IniSettings.Version <> '') then
-                  begin
-                    filename := IncludeTrailingPathDelimiter(demodir) +
-                                IncludeTrailingPathDelimiter(fnRemoveInvalidChar(IniSettings.name)) +
-                                IncludeTrailingPathDelimiter(fnRemoveInvalidChar(IniSettings.Version)) +
-                                filename;
-                  end else
-                    if (IniSettings.Name <> '') then
-                      filename := IncludeTrailingPathDelimiter(demodir) +
-                                  IncludeTrailingPathDelimiter(fnRemoveInvalidChar(IniSettings.name)) +
-                                  filename
-                    else
-                      filename := IncludeTrailingPathDelimiter(demodir) + filename;
-                end else
-                  filename := IncludeTrailingPathDelimiter(demodir) + filename;
-              end;
-
-              if fileexists (filename + '.tad') then
-              begin
-                a := 1;
-                repeat
-                  inc (a);
-                until not fileexists (filename + ' - nr ' + inttostr (a) + '.tad');
-                filename := filename + ' - nr ' + inttostr (a);
-              end;
-              filename := filename + '.tad';
+              MakeAutoFileName;
               createlogfile();
               prevtime := timeGetTime;
             end;
@@ -3248,7 +3279,10 @@ except
     finally
       TLog.Flush;
       if logsave <> nil then
-        logsave.Flush;
+        try
+          logsave.Flush;
+        except
+        end;
 
     end;
     end;
@@ -3292,9 +3326,18 @@ if RecieveReturnAddr = 0 then
 Result := DP_OK;
 bufsize := lpdwDataSize;
 try
-
+    // BUGFIX: Guard against empty Players list crash (AV at 0x00000002)
     if MessageQueue.count <> 0 then
-      lpidFrom := Players[GetGoodSource].ID
+      begin
+      if Players.Count > 0 then
+        lpidFrom := Players[GetGoodSource].ID
+      else
+        begin
+        TLog.add(4, 'ERROR: MessageQueue has messages but Players list is empty!');
+        Result := DPERR_INVALIDPLAYER;
+        Exit;
+        end;
+      end
     else if TakeStatus = SelfTaking then
       begin
       for i := 1 to Players.Count do
@@ -3455,7 +3498,10 @@ except
     finally
       TLog.Flush;
       if logsave <> nil then
-        logsave.Flush;
+        try
+          logsave.Flush;
+        except
+        end;
 
     end;
     end;
@@ -3507,14 +3553,28 @@ var
   i   :integer;
   max :longword;
 begin
+// BUGFIX: Guard against empty Players list and invalid index access
+if Players.Count <= 0 then
+  begin
+  TLog.add(4, 'ERROR: GetGoodSource called with empty Players list!');
+  Result := 1;  // Return safe default (will be guarded by caller)
+  Exit;
+  end;
+
 max := 0;
 cur := 1;
+// Safely iterate from player 2 onwards
 for i := 2 to Players.Count do
   if Players[i].LastMsgTimeStamp > max then
     begin
     max := Players[i].LastMsgTimeStamp;
     cur := i;
     end;
+
+// Ensure returned index is within bounds
+if (cur < 1) or (cur > Players.Count) then
+  cur := 1;
+
 Result := cur;
 end;
 

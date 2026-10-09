@@ -30,6 +30,7 @@ procedure SaveGame_LoadNoScriptsFix;
 
 implementation
 uses
+  SysUtils,
   IniOptions,
   TA_MemoryConstants,
   TA_MemoryLocations,
@@ -37,6 +38,65 @@ uses
   ExtensionsMem,
   MaxScriptSlots,
   COB_Extensions;
+
+{ -----------------------------------------------------------------------
+  BUGFIX (crash: Access Violation, illegal read 0x00000002, inside
+  SynCommons RecordSaveLength / RecordEquals while saving a single-player
+  game).
+
+  Root cause: UnitSearchArr / SpawnedMinionsArr are "array of TStoreUnitsRec",
+  and TStoreUnitsRec itself contains a nested dynamic array field
+  (UnitIds: array of LongWord). SynCommons' generic FPC-RTTI based
+  TDynArray.SaveToStream/LoadFromStream (which call RecordSaveLength /
+  RecordSave internally) cannot reliably walk this "array of record
+  containing a dynamic array" shape under this FPC/mORMot combination,
+  and reads through a bogus small pointer, causing the AV.
+
+  Fix: serialize these two arrays manually with plain stream reads/writes,
+  bypassing SynCommons' RTTI record walker entirely. This keeps the
+  feature working (unit-search results / spawned-minions tracking survive
+  a save/load) without touching the buggy generic path.
+  ----------------------------------------------------------------------- }
+
+procedure SaveStoreUnitsArrManual(const Arr: TUnitSearchArr; Count: Integer; Stream: TMemoryStream);
+var
+  i, j, n : Integer;
+begin
+  n := Count;
+  if n > Length(Arr) then n := Length(Arr);
+  if n < 0 then n := 0;
+  Stream.WriteBuffer(n, SizeOf(n));
+  for i := 0 to n - 1 do
+  begin
+    Stream.WriteBuffer(Arr[i].Id, SizeOf(Arr[i].Id));
+    j := Length(Arr[i].UnitIds);
+    Stream.WriteBuffer(j, SizeOf(j));
+    if j > 0 then
+      Stream.WriteBuffer(Arr[i].UnitIds[0], j * SizeOf(LongWord));
+  end;
+end;
+
+procedure LoadStoreUnitsArrManual(var Arr: TUnitSearchArr; var Count: Integer; Stream: TMemoryStream);
+var
+  i, j, n : Integer;
+begin
+  n := 0;
+  Stream.ReadBuffer(n, SizeOf(n));
+  if (n < 0) or (n > 200000) then Exit; // sanity guard against a corrupt/foreign stream
+  if Length(Arr) < n then
+    SetLength(Arr, n);
+  for i := 0 to n - 1 do
+  begin
+    Stream.ReadBuffer(Arr[i].Id, SizeOf(Arr[i].Id));
+    j := 0;
+    Stream.ReadBuffer(j, SizeOf(j));
+    if (j < 0) or (j > 1000000) then Exit; // sanity guard
+    SetLength(Arr[i].UnitIds, j);
+    if j > 0 then
+      Stream.ReadBuffer(Arr[i].UnitIds[0], j * SizeOf(LongWord));
+  end;
+  Count := n;
+end;
 
 Procedure OnInstallSaveGame;
 begin
@@ -209,10 +269,18 @@ begin
     begin
       Stream := TMemoryStream.Create;
       try
-        UnitSearchResults.SaveToStream(Stream);
-        Stream.Position := 0;
-        HAPIBANK_AccessSafeDeposit(nil, nil, HAPIBANK, PAnsiChar('UnitSearch')) ;
-        HAPIBANK_WriteBinData(nil, nil, HAPIBANK, Stream.Size, Stream.Memory);
+        try
+          // BUGFIX: was UnitSearchResults.SaveToStream(Stream) - that went through
+          // SynCommons' generic RTTI record walker (RecordSaveLength) which crashes
+          // (AV reading address 0x2) on this "array of record-with-nested-dynamic-
+          // array" shape. Serialize it by hand instead.
+          SaveStoreUnitsArrManual(UnitSearchArr, UnitSearchCount, Stream);
+          Stream.Position := 0;
+          HAPIBANK_AccessSafeDeposit(nil, nil, HAPIBANK, PAnsiChar('UnitSearch')) ;
+          HAPIBANK_WriteBinData(nil, nil, HAPIBANK, Stream.Size, Stream.Memory);
+        except
+          on E: Exception do ; // swallow: do not let custom-data serialization crash the game save
+        end;
       finally
         Stream.Free;
       end;
@@ -222,10 +290,15 @@ begin
     begin
       Stream := TMemoryStream.Create;
       try
-        SpawnedMinions.SaveToStream(Stream);
-        Stream.Position := 0;
-        HAPIBANK_AccessSafeDeposit(nil, nil, HAPIBANK, PAnsiChar('SpawnedMinions'));
-        HAPIBANK_WriteBinData(nil, nil, HAPIBANK, Stream.Size, Stream.Memory);
+        try
+          // BUGFIX: was SpawnedMinions.SaveToStream(Stream) - same crash as above.
+          SaveStoreUnitsArrManual(SpawnedMinionsArr, SpawnedMinionsCount, Stream);
+          Stream.Position := 0;
+          HAPIBANK_AccessSafeDeposit(nil, nil, HAPIBANK, PAnsiChar('SpawnedMinions'));
+          HAPIBANK_WriteBinData(nil, nil, HAPIBANK, Stream.Size, Stream.Memory);
+        except
+          on E: Exception do ; // swallow: do not let custom-data serialization crash the game save
+        end;
       finally
         Stream.Free;
       end;
@@ -259,14 +332,20 @@ begin
     begin
       Stream := TMemoryStream.Create;
       try
-        StreamSize := HAPIBANK_GetItemSize(nil, nil, HAPIBANK);
-        if StreamSize > 0 then
-        begin
-          Stream.SetSize(StreamSize);
-          HAPIBANK_ReadBinData(nil, nil, HAPIBANK, StreamSize, Stream.Memory);
-          Stream.Position := 0;
-          if not UnitSearchResults.IsVoid then
-            UnitSearchResults.LoadFromStream(Stream);
+        try
+          StreamSize := HAPIBANK_GetItemSize(nil, nil, HAPIBANK);
+          if StreamSize > 0 then
+          begin
+            Stream.SetSize(StreamSize);
+            HAPIBANK_ReadBinData(nil, nil, HAPIBANK, StreamSize, Stream.Memory);
+            Stream.Position := 0;
+            // BUGFIX: was UnitSearchResults.LoadFromStream(Stream) - paired with the
+            // manual writer above; see SaveStoreUnitsArrManual for why.
+            if not UnitSearchResults.IsVoid then
+              LoadStoreUnitsArrManual(UnitSearchArr, UnitSearchCount, Stream);
+          end;
+        except
+          on E: Exception do ; // swallow: a mismatched/corrupt block must not crash the load
         end;
       finally
         Stream.Free;
@@ -277,14 +356,19 @@ begin
     begin
       Stream := TMemoryStream.Create;
       try
-        StreamSize := HAPIBANK_GetItemSize(nil, nil, HAPIBANK);
-        if StreamSize > 0 then
-        begin
-          Stream.SetSize(StreamSize);
-          HAPIBANK_ReadBinData(nil, nil, HAPIBANK, StreamSize, Stream.Memory);
-          Stream.Position := 0;
-          if not SpawnedMinions.IsVoid then
-            SpawnedMinions.LoadFromStream(Stream);
+        try
+          StreamSize := HAPIBANK_GetItemSize(nil, nil, HAPIBANK);
+          if StreamSize > 0 then
+          begin
+            Stream.SetSize(StreamSize);
+            HAPIBANK_ReadBinData(nil, nil, HAPIBANK, StreamSize, Stream.Memory);
+            Stream.Position := 0;
+            // BUGFIX: was SpawnedMinions.LoadFromStream(Stream) - same reasoning.
+            if not SpawnedMinions.IsVoid then
+              LoadStoreUnitsArrManual(SpawnedMinionsArr, SpawnedMinionsCount, Stream);
+          end;
+        except
+          on E: Exception do ; // swallow: a mismatched/corrupt block must not crash the load
         end;
       finally
         Stream.Free;
