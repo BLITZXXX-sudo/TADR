@@ -99,9 +99,14 @@ if ($hasChanges) {
 
 # ---------------------------------------------------------------- 5. PUSH
 if (-not $SkipPush) {
-    $branch = git rev-parse --abbrev-ref HEAD
-    Write-Host "==> Pushing $branch ..." -ForegroundColor Cyan
-    git push
+    # local branch name (master-ci) can differ from the remote branch it tracks (master) -
+    # push explicitly to whatever the upstream actually is instead of relying on git's
+    # push.default guess.
+    $upstream = git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>$null
+    if (-not $upstream) { Fail "current branch has no upstream configured - set one with 'git branch --set-upstream-to=origin/<branch>' then re-run with -NoBuild" }
+    $remoteBranch = $upstream -replace '^[^/]+/', ''
+    Write-Host "==> Pushing HEAD to origin/$remoteBranch ..." -ForegroundColor Cyan
+    git push origin "HEAD:$remoteBranch"
     if ($LASTEXITCODE -ne 0) { Fail "git push failed - resolve manually (pull/rebase?) then re-run with -NoBuild" }
     Write-Host "Pushed." -ForegroundColor Green
 } else {
