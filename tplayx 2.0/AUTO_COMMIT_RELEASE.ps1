@@ -127,7 +127,10 @@ if (-not $SkipRelease -and -not $SkipPush) {
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
     if ($ghCmd) {
         Write-Host "==> Creating GitHub release $tag ..." -ForegroundColor Cyan
-        gh release delete $tag --yes 2>$null
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        gh release delete $tag --yes *>$null   # ok if it doesn't exist yet
+        $ErrorActionPreference = $prevEAP
         gh release create $tag $zipPath --title "tplayx $version" --notes $Message
         Write-Host "Release $tag created with $zipPath attached." -ForegroundColor Green
     } else {
