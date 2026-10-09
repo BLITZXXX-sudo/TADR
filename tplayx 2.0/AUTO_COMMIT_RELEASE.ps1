@@ -126,13 +126,27 @@ if (-not $SkipRelease -and -not $SkipPush) {
 
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
     if ($ghCmd) {
-        Write-Host "==> Creating GitHub release $tag ..." -ForegroundColor Cyan
+        # Resolve the repo explicitly from the "origin" remote - this checkout also has an
+        # "upstream" remote (the original project), and gh's own default-repo guess is not
+        # reliable when both exist, so every gh call below is pinned with --repo.
+        $originUrl = git remote get-url origin
+        if ($originUrl -notmatch 'github\.com[:/](?<repo>[^/]+/[^/.]+)(\.git)?$') {
+            Fail "could not parse owner/repo out of origin remote '$originUrl'"
+        }
+        $ghRepo = $Matches['repo']
+        Write-Host "==> Creating GitHub release $tag on $ghRepo ..." -ForegroundColor Cyan
+
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = "SilentlyContinue"
-        gh release delete $tag --yes *>$null   # ok if it doesn't exist yet
+        gh release delete $tag --yes --repo $ghRepo *>$null   # ok if it doesn't exist yet
         $ErrorActionPreference = $prevEAP
-        gh release create $tag $zipPath --title "tplayx $version" --notes $Message
-        Write-Host "Release $tag created with $zipPath attached." -ForegroundColor Green
+
+        gh release create $tag $zipPath --repo $ghRepo --title "tplayx $version" --notes $Message
+        if ($LASTEXITCODE -ne 0) { Fail "gh release create failed (exit $LASTEXITCODE) - see output above" }
+
+        $releaseUrl = gh release view $tag --repo $ghRepo --json url -q ".url" 2>$null
+        if (-not $releaseUrl) { Fail "gh release create reported success but the release can't be found on $ghRepo afterwards" }
+        Write-Host "Release $tag created on $ghRepo : $releaseUrl" -ForegroundColor Green
     } else {
         Write-Host "gh CLI not found - skipping GitHub release. DLL zipped at $zipPath" -ForegroundColor Yellow
     }
